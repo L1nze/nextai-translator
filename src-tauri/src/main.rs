@@ -22,12 +22,10 @@ use insertion::{
     insert_translation_into_previous_input, remember_active_window, remember_active_window_command,
 };
 use parking_lot::Mutex;
-use serde_json::json;
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use sysinfo::{CpuExt, System, SystemExt};
-use tauri_plugin_aptabase::EventTracker;
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_updater::UpdaterExt;
 use tauri_specta::Event;
@@ -44,9 +42,9 @@ use crate::windows::{
     get_translator_window_always_on_top, get_writing_indicator_pending_lang,
     hide_inline_lookup_window, hide_quick_translator_window, hide_translator_window,
     hide_writing_indicator, recover_webview_visibility, show_action_manager_window,
-    show_history_window, show_inline_lookup_window_command, show_quick_translator_window_command,
-    show_translator_window_command, show_translator_window_with_selected_text_command,
-    show_updater_window, show_writing_indicator, TRANSLATOR_WIN_NAME,
+    show_history_window, show_inline_lookup_window_command, show_quick_translator_window_command, show_translator_window_command,
+    show_translator_window_with_selected_text_command, show_updater_window,
+    show_writing_indicator, HISTORY_WIN_NAME, SETTINGS_WIN_NAME, TRANSLATOR_WIN_NAME,
 };
 use crate::writing::{finish_writing, write_to_input, writing_command};
 
@@ -300,16 +298,24 @@ fn bind_mouse_hook() {
                             }
                         }
 
-                        let _lock = RELEASE_THREAD_ID.lock();
-                        let selected_text = get_selected_text().unwrap_or_default();
-                        if !selected_text.is_empty() {
-                            {
-                                *SELECTED_TEXT.lock() = selected_text;
-                            }
-                            windows::show_thumb(x, y);
-                        } else {
-                            windows::close_thumb();
+                    let _lock = RELEASE_THREAD_ID.lock();
+                    let selected_text = get_selected_text().unwrap_or_default();
+                    if !selected_text.is_empty() {
+                        {
+                            *SELECTED_TEXT.lock() = selected_text;
                         }
+                        // The selection icon is optional: with it off, users
+                        // trigger translation purely via the global hotkey.
+                        let show_selection_icon = config::get_config()
+                            .ok()
+                            .and_then(|c| c.show_selection_icon)
+                            .unwrap_or(true);
+                        if show_selection_icon {
+                            windows::show_thumb(x, y);
+                        }
+                    } else {
+                        windows::close_thumb();
+                    }
                     });
                 } else {
                     windows::close_thumb();
@@ -424,23 +430,6 @@ fn main() {
 
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut app = tauri::Builder::default()
-        .plugin(
-            tauri_plugin_aptabase::Builder::new("A-US-9856842764")
-                .with_panic_hook(Box::new(|client, info, msg| {
-                    let location = info
-                        .location()
-                        .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
-                        .unwrap_or_else(|| "".to_string());
-
-                    let _ = client.track_event(
-                        "panic",
-                        Some(json!({
-                            "info": format!("{} ({})", msg, location),
-                        })),
-                    );
-                }))
-                .build(),
-        )
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -587,12 +576,7 @@ fn main() {
     }
 
     app.run(|app, event| match event {
-        tauri::RunEvent::Exit { .. } => {
-            let _ = app.track_event("app_exited", None);
-            app.flush_events_blocking();
-        }
         tauri::RunEvent::Ready => {
-            let _ = app.track_event("app_started", None);
             bind_mouse_hook();
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -636,13 +620,26 @@ fn main() {
             event: tauri::WindowEvent::CloseRequested { api, .. },
             ..
         } => {
-            if label != TRANSLATOR_WIN_NAME {
+            if label == TRANSLATOR_WIN_NAME {
+                windows::do_hide_translator_window();
+
+                api.prevent_close();
                 return;
             }
 
-            windows::do_hide_translator_window();
-
-            api.prevent_close();
+            // The utility windows stay alive, hidden: destroying a WebView2
+            // controller hitches the main thread for a few hundred
+            // milliseconds, which reads as a stutter on every close (the
+            // whole app shares that thread). Hiding is instant, reopening
+            // becomes instant too, and the hidden webview stops compositing
+            // once its controller visibility is synced.
+            if label == SETTINGS_WIN_NAME || label == HISTORY_WIN_NAME {
+                if let Some(window) = app.get_webview_window(&label) {
+                    windows::set_webview_visibility(&window, false);
+                    let _ = window.hide();
+                }
+                api.prevent_close();
+            }
         }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen {

@@ -1,4 +1,4 @@
-import { CSSProperties, Fragment, ReactNode, useState } from 'react'
+import { CSSProperties, Fragment, memo, ReactNode, useState } from 'react'
 import { LangCode } from '../lang'
 import { BaseThemeType } from '../types'
 import { useTheme } from '../hooks/useTheme'
@@ -167,7 +167,7 @@ function renderHighlightedRange(text: string, offset: number, themeType: BaseThe
     )
 }
 
-export function PhoneticText({
+export function PhoneticTextBase({
     text,
     fallbackText,
     highlightRange,
@@ -267,3 +267,7 @@ export function PhoneticText({
         </>
     )
 }
+
+// Memoized so typing in the input area does not re-run the per-line phonetic
+// regex parsing over the whole translated output.
+export const PhoneticText = memo(PhoneticTextBase)

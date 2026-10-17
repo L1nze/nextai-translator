@@ -79,7 +79,6 @@ const settingKeys: Record<keyof ISettings, number> = {
     runAtStartup: 1,
     selectInputElementsText: 1,
     readSelectedWordsFromInputElementsText: 1,
-    disableCollectingStatistics: 1,
     allowUsingClipboardWhenSelectedTextNotAvailable: 1,
     pinned: 1,
     autoCollect: 1,
@@ -120,6 +119,21 @@ const settingKeys: Record<keyof ISettings, number> = {
     liteLLMAPIURL: 1,
     liteLLMAPIKey: 1,
     liteLLMAPIModel: 1,
+    siliconFlowAPIKey: 1,
+    siliconFlowAPIModel: 1,
+    dashScopeAPIKey: 1,
+    dashScopeAPIModel: 1,
+    zhipuAPIURL: 1,
+    zhipuAPIKey: 1,
+    zhipuAPIModel: 1,
+    mimoAPIKey: 1,
+    mimoAPIModel: 1,
+    customAPIURL: 1,
+    customAPIURLPath: 1,
+    customAPIKey: 1,
+    customAPIModel: 1,
+    openCodeAPIKey: 1,
+    openCodeAPIModel: 1,
     fontSize: 1,
     uiFontSize: 1,
     iconSize: 1,
@@ -127,6 +141,10 @@ const settingKeys: Record<keyof ISettings, number> = {
     claudeThinking: 1,
     claudeThinkingLevel: 1,
     useCompactLookup: 1,
+    showSelectionIcon: 1,
+    polishingSummarizeUseSeparateProvider: 1,
+    polishingSummarizeProvider: 1,
+    polishingSummarizeAPIModel: 1,
 }
 
 export async function getSettings(): Promise<ISettings> {
@@ -164,11 +182,13 @@ export async function getSettings(): Promise<ISettings> {
     if (settings.alwaysShowIcons === undefined || settings.alwaysShowIcons === null) {
         settings.alwaysShowIcons = !isTauri()
     }
+    if (settings.showSelectionIcon === undefined || settings.showSelectionIcon === null) {
+        // Default on: the floating icon keeps working until the user opts
+        // into the hotkey-only flow.
+        settings.showSelectionIcon = true
+    }
     if (!settings.i18n) {
         settings.i18n = defaulti18n
-    }
-    if (!settings.disableCollectingStatistics) {
-        settings.disableCollectingStatistics = false
     }
     if (settings.selectInputElementsText === undefined || settings.selectInputElementsText === null) {
         settings.selectInputElementsText = defaultSelectInputElementsText
@@ -217,7 +237,10 @@ export async function getSettings(): Promise<ISettings> {
         }
     }
     if (!settings.languageDetectionEngine) {
-        settings.languageDetectionEngine = 'baidu'
+        // Local detection answers in microseconds without a network round
+        // trip, which keeps the selection-to-first-token path fast; users who
+        // prefer a remote detector can still pick one in Settings.
+        settings.languageDetectionEngine = 'local'
     }
     if (!settings.proxy) {
         settings.proxy = {
@@ -246,6 +269,15 @@ export async function getSettings(): Promise<ISettings> {
     }
     if (!settings.liteLLMAPIURL) {
         settings.liteLLMAPIURL = 'http://localhost:4000'
+    }
+    if (!settings.zhipuAPIURL) {
+        settings.zhipuAPIURL = 'https://open.bigmodel.cn/api'
+    }
+    if (!settings.customAPIURL) {
+        settings.customAPIURL = ''
+    }
+    if (!settings.customAPIURLPath) {
+        settings.customAPIURLPath = '/v1/chat/completions'
     }
     if (!settings.claudeAPIURL) {
         settings.claudeAPIURL = 'https://api.anthropic.com'
@@ -617,6 +649,18 @@ export function getAPIKeyForProvider(provider: string, settings: ISettings): str
             return settings.openRouterAPIKey
         case 'LiteLLM':
             return settings.liteLLMAPIKey
+        case 'SiliconFlow':
+            return settings.siliconFlowAPIKey
+        case 'DashScope':
+            return settings.dashScopeAPIKey
+        case 'Zhipu':
+            return settings.zhipuAPIKey
+        case 'MiMo':
+            return settings.mimoAPIKey
+        case 'Custom':
+            return settings.customAPIKey
+        case 'OpenCode':
+            return settings.openCodeAPIKey
         case 'Moonshot':
             return settings.moonshotAPIKey
         case 'MiniMax':

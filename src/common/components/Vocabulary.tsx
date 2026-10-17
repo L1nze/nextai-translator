@@ -4,7 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { createUseStyles } from 'react-jss'
 import { StatefulTooltip } from 'baseui-sd/tooltip'
 import { IThemedStyleProps } from '../types'
-import { MdOutlineGrade, MdGrade } from 'react-icons/md'
+import { MdOutlineGrade, MdGrade } from './local-md-icons'
 import { useTranslation } from 'react-i18next'
 import { FaDice } from 'react-icons/fa'
 import { AiOutlineCloseCircle } from 'react-icons/ai'
@@ -14,14 +14,15 @@ import { toast } from 'react-hot-toast'
 import { translate } from '../translate'
 import CopyToClipboard from 'react-copy-to-clipboard'
 import { RxCopy } from 'react-icons/rx'
+import { TbCsv } from 'react-icons/tb'
 import { format } from 'date-fns'
 import { useCollectedWordTotal } from '../hooks/useCollectedWordTotal'
 import { RiPictureInPictureExitLine } from 'react-icons/ri'
 import { Tooltip } from './Tooltip'
-import { isDesktopApp, isTauri } from '../utils'
+import { isDesktopApp, isTauri, exportToCsv } from '../utils'
 import { vocabularyService } from '../services/vocabulary'
 import { VocabularyItem } from '../internal-services/db'
-import { trackEvent } from '@aptabase/tauri'
+import { trackEvent } from '../track'
 import { SpeakerIcon } from './SpeakerIcon'
 import { useSettings } from '../hooks/useSettings'
 import { LangCode, detectLang } from '../lang'
@@ -184,6 +185,9 @@ interface IVocabularyProps {
     type: 'vocabulary' | 'article'
     onCancel: () => void
     onInsert: (content: string, highlightWords: string[]) => void
+    // Lets the modal switch between word review and the Big Bang article
+    // generator itself, so the main window only needs one entry button.
+    onTypeChange?: (type: 'vocabulary' | 'article') => void
 }
 
 const Vocabulary = (props: IVocabularyProps) => {
@@ -267,6 +271,21 @@ const Vocabulary = (props: IVocabularyProps) => {
             setSelectedWord(undefined)
             const randomWords = await vocabularyService.listRandomItems(RANDOM_SIZE)
             setWords(randomWords)
+        } catch (e) {
+            console.error(e)
+        }
+    }
+
+    const onCsvExport = async () => {
+        try {
+            const words = await vocabularyService.listItems()
+            await exportToCsv<VocabularyItem>(`nextai-translator-collection-${new Date().valueOf()}`, words)
+            if (isDesktopApp()) {
+                toast(t('CSV file saved on Desktop'), {
+                    duration: 5000,
+                    icon: '👏',
+                })
+            }
         } catch (e) {
             console.error(e)
         }
@@ -388,8 +407,40 @@ const Vocabulary = (props: IVocabularyProps) => {
                     {t(props.type === 'article' ? 'generate article' : props.type)}
                 </div>
                 <div style={{ flex: 1 }}></div>
-                <div className={styles.closeBtn} onClick={props.onCancel}>
-                    <AiOutlineCloseCircle fontSize={13} />
+                <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '2px' }}>
+                    {props.type === 'vocabulary' && (
+                        <>
+                            <StatefulTooltip
+                                content={t('Export your collection as a csv file')}
+                                placement='bottom'
+                                showArrow
+                            >
+                                <div className={styles.actionButton} onClick={onCsvExport}>
+                                    <TbCsv size={15} />
+                                </div>
+                            </StatefulTooltip>
+                            {props.onTypeChange && (
+                                <StatefulTooltip content='Big Bang' placement='bottom' showArrow>
+                                    <div
+                                        className={styles.actionButton}
+                                        onClick={() => props.onTypeChange?.('article')}
+                                    >
+                                        <FcIdea size={15} />
+                                    </div>
+                                </StatefulTooltip>
+                            )}
+                        </>
+                    )}
+                    {props.type === 'article' && props.onTypeChange && (
+                        <StatefulTooltip content={t('Collection Review')} placement='bottom' showArrow>
+                            <div className={styles.actionButton} onClick={() => props.onTypeChange?.('vocabulary')}>
+                                <MdGrade size={15} />
+                            </div>
+                        </StatefulTooltip>
+                    )}
+                    <div className={styles.closeBtn} onClick={props.onCancel}>
+                        <AiOutlineCloseCircle fontSize={13} />
+                    </div>
                 </div>
             </div>
             <div className={styles.list}>

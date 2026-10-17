@@ -21,7 +21,7 @@ import { useSetAtom } from 'jotai'
 
 import { showSettingsAtom } from '@/common/store/setting'
 import { commands } from '../bindings'
-import { trackEvent } from '@aptabase/tauri'
+import { trackEvent } from '../../common/track'
 
 addEventListener('unhandledrejection', (e) => {
     trackEvent('promise_rejected', {
@@ -42,6 +42,9 @@ const engine = new Styletron({
 export interface IWindowProps {
     isTranslatorWindow?: boolean
     windowsTitlebarDisableDarkMode?: boolean
+    // The window is built without transparency on the Rust side, so blur
+    // effects must be skipped and an opaque background always painted.
+    opaque?: boolean
     children: React.ReactNode
 }
 
@@ -147,7 +150,7 @@ export function InnerWindow(props: IWindowProps) {
     useEffect(() => {
         const appWindow = WebviewWindow.getCurrent()
         const applyEffects = async () => {
-            if (!isMacOS && !isWindows) {
+            if (props.opaque || (!isMacOS && !isWindows)) {
                 setBackgroundBlur(false)
                 return
             }
@@ -172,7 +175,7 @@ export function InnerWindow(props: IWindowProps) {
             }
         }
         void applyEffects()
-    }, [settings.enableBackgroundBlur, settings.themeType])
+    }, [props.opaque, settings.enableBackgroundBlur, settings.themeType])
 
     // Self-healing visibility recovery, gated on user interaction: WebKit
     // sometimes fails to notify a page that its window became visible again
@@ -252,7 +255,7 @@ export function InnerWindow(props: IWindowProps) {
             style={{
                 position: 'relative',
                 background: backgroundBlur ? 'transparent' : theme.colors.backgroundPrimary,
-                font: '14px/1.6 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji"',
+                font: '14px/1.6 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans SC",Roboto,"Helvetica Neue",Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji"',
                 letterSpacing: '-0.01em',
                 WebkitFontSmoothing: 'antialiased',
                 MozOsxFontSmoothing: 'grayscale',

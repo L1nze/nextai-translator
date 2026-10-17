@@ -10,14 +10,13 @@ import { format } from 'date-fns'
 import { Button } from 'baseui-sd/button'
 import { List, arrayMove } from 'baseui-sd/dnd-list'
 import { RiDeleteBinLine } from 'react-icons/ri'
-import { createElement, useCallback, useReducer, useState } from 'react'
-import * as mdIcons from 'react-icons/md'
+import { useCallback, useReducer, useState } from 'react'
 import { Action } from '../internal-services/db'
 import { Modal, ModalBody, ModalButton, ModalFooter, ModalHeader } from 'baseui-sd/modal'
 import { ActionForm } from './ActionForm'
-import { IconType } from 'react-icons'
+import { ActionIcon } from './ActionIcon'
 import { isDesktopApp } from '../utils'
-import { MdArrowDownward, MdArrowUpward } from 'react-icons/md'
+import { MdArrowDownward, MdArrowUpward } from './local-md-icons'
 import { useSettings } from '../hooks/useSettings'
 import { emit } from '@tauri-apps/api/event'
 
@@ -233,8 +232,7 @@ export function ActionManager({ draggable = true }: IActionManagerProps) {
                         <div key={action.id} className={styles.actionItem}>
                             <div className={styles.actionContent}>
                                 <div className={styles.name}>
-                                    {action.icon &&
-                                        createElement((mdIcons as Record<string, IconType>)[action.icon], { size: 16 })}
+                                    {action.icon && <ActionIcon name={action.icon} size={16} />}
                                     {action.mode ? t(action.name) : action.name}
                                     {action.mode && (
                                         <div

@@ -2,3 +2,4 @@ public
 dist
 src/tauri/bindings.ts
 src-safari
+src/index.d.ts

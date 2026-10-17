@@ -1,7 +1,6 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 
-import Backend from 'i18next-http-backend'
 import LanguageDetector from 'i18next-browser-languagedetector'
 
 import ENtranslation from './i18n/locales/en/translation.json'
@@ -36,8 +35,9 @@ const resources = {
     },
 }
 
-i18n.use(Backend)
-    .use(LanguageDetector)
+// All locale resources are bundled statically; no HTTP backend is needed, so
+// the UI never waits on the network to have translations ready.
+i18n.use(LanguageDetector)
     .use(initReactI18next)
     .init({
         resources,

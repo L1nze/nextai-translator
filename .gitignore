@@ -17,3 +17,6 @@ npm-error.log
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+# tauri updater signing keys (never commit)
+src-tauri/keys/

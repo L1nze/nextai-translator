@@ -367,13 +367,29 @@ export async function detectLang(text: string): Promise<LangCode> {
         // answer 'en'. With a Chinese default target language that turned a
         // Chinese input into a Chinese -> Chinese "translation" (#1906).
         // Treat any failure as "unknown" and let the local detector decide.
+        // A hung request (the detectors carry no timeout of their own)
+        // would also stall the whole translate pipeline, so bound it.
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
         try {
-            const lang = await remoteDetect(detectedText)
+            const lang = await Promise.race([
+                remoteDetect(detectedText),
+                new Promise<undefined>((resolve) => {
+                    // Selection translation must feel instant: a detector
+                    // that has not answered within 800ms is effectively
+                    // offline, and waiting longer just delays the first
+                    // translated token behind a hung request.
+                    timeoutId = setTimeout(() => resolve(undefined), 800)
+                }),
+            ])
             if (lang) {
                 return lang
             }
         } catch (e) {
             console.warn('remote language detection failed, falling back to local detection:', e)
+        } finally {
+            if (timeoutId !== undefined) {
+                clearTimeout(timeoutId)
+            }
         }
     }
     return await localDetectLang(detectedText)

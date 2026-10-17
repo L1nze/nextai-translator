@@ -107,7 +107,6 @@
     "core:menu:default",
     "core:tray:default",
     "updater:default",
-    "aptabase:allow-track-event",
     "shell:allow-execute",
     "shell:allow-kill",
     "shell:allow-open",

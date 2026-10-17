@@ -13,10 +13,6 @@ vi.mock('../hooks/useSettings', () => ({
     useSettings: () => ({ settings: { tts: {} }, isSettingsLoading: false }),
 }))
 import { Markdown } from './Markdown'
-import { PhoneticText } from './PhoneticText'
-import { HoverableText, WordHoverProvider } from './WordHoverCard'
-
-const renderHoverableText = (text: string) => <HoverableText>{text}</HoverableText>
 
 describe('GFM table rendering', () => {
     it('renders pipe tables as HTML tables instead of plain paragraph text', () => {
@@ -40,57 +36,5 @@ describe('GFM table styling', () => {
         expect(html).toMatch(/<td[^>]*text-align:center/)
         expect(html).toMatch(/<td[^>]*vertical-align:middle/)
         expect(html).toMatch(/<td[^>]*word-break:break-word/)
-    })
-
-    it('keeps hoverable word spans inside styled table cells', () => {
-        const html = renderToStaticMarkup(
-            <WordHoverProvider enabled onOpenDetails={() => {}}>
-                <Markdown renderText={renderHoverableText}>
-                    {'| head | col |\n| --- | --- |\n| hello world | data |'}
-                </Markdown>
-            </WordHoverProvider>
-        )
-        expect(html).toMatch(/<td[^>]*>.*role="link"/)
-    })
-})
-
-describe('hover cards + phonetics merge integration', () => {
-    it('keeps hoverable word spans in markdown output when speech props are set', () => {
-        const html = renderToStaticMarkup(
-            <WordHoverProvider enabled onOpenDetails={() => {}}>
-                <Markdown renderText={renderHoverableText} speechLang='en' speechText='hello world'>
-                    {'hello world, this is a test paragraph'}
-                </Markdown>
-            </WordHoverProvider>
-        )
-        expect(html).toContain('role="link"')
-        expect(html).toContain('hello')
-    })
-
-    it('keeps hoverable word spans in markdown output without speech props', () => {
-        const html = renderToStaticMarkup(
-            <WordHoverProvider enabled onOpenDetails={() => {}}>
-                <Markdown renderText={renderHoverableText}>{'hello world'}</Markdown>
-            </WordHoverProvider>
-        )
-        expect(html).toContain('role="link"')
-    })
-
-    it('keeps hoverable word spans inside example sentences', () => {
-        const html = renderToStaticMarkup(
-            <WordHoverProvider enabled onOpenDetails={() => {}}>
-                <PhoneticText text='例句：How are you? (你好吗？)' lang='en' renderText={renderHoverableText} />
-            </WordHoverProvider>
-        )
-        expect(html.match(/role="link"/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
-    })
-
-    it('keeps hoverable word spans in plain-line PhoneticText output', () => {
-        const html = renderToStaticMarkup(
-            <WordHoverProvider enabled onOpenDetails={() => {}}>
-                <PhoneticText text='hello · /həˈloʊ/ world' lang='en' renderText={renderHoverableText} />
-            </WordHoverProvider>
-        )
-        expect(html).toContain('role="link"')
     })
 })

@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { getLangConfig, getLangName, LangCode } from '../common/lang'
 import { Action } from './internal-services/db'
 import { codeBlock, oneLine, oneLineTrim } from 'common-tags'
-import { getEngine } from './engines'
+import { FREE_MT_PROVIDERS, getEngine } from './engines'
 import { getSettings } from './utils'
 
 export type TranslateMode = 'translate' | 'polishing' | 'summarize' | 'analyze' | 'explain-code' | 'big-bang'
@@ -211,6 +211,28 @@ export async function translate(query: TranslateQuery) {
     let contentPrompt = query.text
     let isWordMode = false
 
+    const settings = await getSettings()
+
+    // Provider resolution: per-action override first, then the single shared
+    // polishing / summarize provider (kept apart from the global provider
+    // so a free-MT global provider never breaks those LLM-only modes), then
+    // the global provider.
+    const useSeparatePolishingSummarize =
+        (query.mode === 'polishing' || query.mode === 'summarize') && settings.polishingSummarizeUseSeparateProvider
+    const modeProvider = useSeparatePolishingSummarize ? settings.polishingSummarizeProvider : undefined
+    const effectiveProvider = (query.mode !== 'big-bang' && query.action?.provider) || modeProvider || settings.provider
+    // Same precedence for the model: per-action override, then the shared
+    // polishing / summarize model (empty string falls through to the
+    // provider's default model inside the engine), then the provider default.
+    const modeModel = useSeparatePolishingSummarize ? settings.polishingSummarizeAPIModel : undefined
+    const effectiveModel = query.mode !== 'big-bang' ? query.action?.apiModel || modeModel || undefined : undefined
+
+    // Free machine-translation services are translation-only: they receive
+    // the raw text via `sourceText` and never see an LLM prompt, so the
+    // whole prompt-building pipeline below is skipped for them. Summarize /
+    // polishing / analysis actions must run on a regular LLM provider.
+    const isFreeMTProvider = FREE_MT_PROVIDERS.has(effectiveProvider)
+
     if (query.mode === 'big-bang') {
         rolePrompt = oneLine`
         You are a professional writer
@@ -220,7 +242,7 @@ export async function translate(query: TranslateQuery) {
         Write ${query.articlePrompt} of no more than 160 words.
         The article must contain the words in the following text.
         The more words you use, the better`
-    } else {
+    } else if (!isFreeMTProvider) {
         const sourceLangCode = query.detectFrom
         const targetLangCode = query.detectTo
         const sourceLangName = getLangName(sourceLangCode)
@@ -403,15 +425,9 @@ If you understand, say "yes", and then we will begin.`
         }
     }
 
-    if (contentPrompt) {
+    if (contentPrompt && !isFreeMTProvider) {
         commandPrompt = `Only reply the result and nothing else. ${commandPrompt}:\n\n${contentPrompt.trimEnd()}`
     }
-
-    const settings = await getSettings()
-
-    // Use per-action provider/model if configured, otherwise fall back to global settings
-    const effectiveProvider = (query.mode !== 'big-bang' && query.action?.provider) || settings.provider
-    const effectiveModel = query.mode !== 'big-bang' ? query.action?.apiModel : undefined
 
     // Resolve Claude thinking settings
     let thinkingBudget: number | undefined
@@ -432,6 +448,10 @@ If you understand, say "yes", and then we will begin.`
         commandPrompt,
         modelOverride: effectiveModel,
         thinkingBudget,
+        sourceText: query.text,
+        fromLang: query.mode === 'big-bang' ? undefined : query.detectFrom,
+        toLang: query.mode === 'big-bang' ? undefined : query.detectTo,
+        mode: query.mode,
         onMessage: async (message) => {
             await query.onMessage({ ...message, isWordMode })
         },

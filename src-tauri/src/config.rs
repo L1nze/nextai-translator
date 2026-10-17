@@ -47,6 +47,7 @@ pub struct Config {
     pub hide_the_icon_in_the_dock: Option<bool>,
     pub proxy: Option<ProxyConfig>,
     pub use_compact_lookup: Option<bool>,
+    pub show_selection_icon: Option<bool>,
 }
 
 static CONFIG_CACHE: Mutex<Option<Config>> = Mutex::new(None);

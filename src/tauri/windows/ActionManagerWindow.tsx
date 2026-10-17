@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { ActionManager } from '../../common/components/ActionManager'
 import { Window } from '../components/Window'
-import { trackEvent } from '@aptabase/tauri'
+import { trackEvent } from '../../common/track'
 
 export function ActionManagerWindow() {
     useEffect(() => {

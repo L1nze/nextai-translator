@@ -1,13 +1,14 @@
 import { useCallback, useEffect } from 'react'
 import { Window } from '../components/Window'
 import { TranslationHistory } from '../../common/components/TranslationHistory'
+import { WindowControls } from '../../common/components/WindowControls'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { actionService } from '../../common/services/action'
 import { HistoryItem } from '../../common/internal-services/db'
 import { emit } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useMemoWindow } from '../../common/hooks/useMemoWindow'
-import { trackEvent } from '@aptabase/tauri'
+import { trackEvent } from '../../common/track'
 
 export function HistoryWindow() {
     useMemoWindow({ size: true, position: true, show: true })
@@ -28,7 +29,8 @@ export function HistoryWindow() {
     }, [])
 
     return (
-        <Window>
+        <Window opaque>
+            <WindowControls />
             <TranslationHistory
                 variant='window'
                 isOpen

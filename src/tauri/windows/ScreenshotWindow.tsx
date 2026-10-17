@@ -1,4 +1,4 @@
-import { trackEvent } from '@aptabase/tauri'
+import { trackEvent } from '../../common/track'
 import { appCacheDir, join } from '@tauri-apps/api/path'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'

@@ -4,6 +4,9 @@ module.exports = {
         es2021: true,
         node: true,
     },
+    // The browser-extension surface is no longer built (Windows/Tauri only)
+    // and is excluded from tsconfig, so ESLint's project parser skips it too.
+    ignorePatterns: ['src/browser-extension/**'],
     extends: ['eslint:recommended', 'plugin:react/recommended', 'plugin:@typescript-eslint/recommended', 'prettier'],
     overrides: [],
     parser: '@typescript-eslint/parser',

@@ -1,11 +1,11 @@
 import { IconType } from 'react-icons'
-import * as mdIcons from 'react-icons/md'
 import { createUseStyles } from 'react-jss'
 import { Button } from 'baseui-sd/button'
-import { useEffect, useState, createElement, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { VariableSizeGrid as Grid } from 'react-window'
 import { Input } from 'baseui-sd/input'
 import { useTranslation } from 'react-i18next'
+import { ActionIcon } from './ActionIcon'
 
 const useStyles = createUseStyles({
     root: {},
@@ -49,13 +49,23 @@ export function IconPicker({ value, onChange }: IIconPickerProps) {
 
     const [searchText, setSearchText] = useState('')
 
+    // The full Material icon set is a ~2MB chunk; only fetch it when the
+    // picker grid is actually expanded.
+    const [iconMap, setIconMap] = useState<Record<string, IconType>>()
+    useEffect(() => {
+        if (!showIcons || iconMap) {
+            return
+        }
+        import('./md-icon-registry').then((m) => setIconMap(m.mdIconMap))
+    }, [showIcons, iconMap])
+
     const iconNames = useMemo(() => {
-        const names = Object.keys(mdIcons)
+        const names = Object.keys(iconMap ?? {})
         if (searchText) {
             return names.filter((name) => name.toLowerCase().includes(searchText.toLowerCase()))
         }
         return names
-    }, [searchText])
+    }, [searchText, iconMap])
 
     const styles = useStyles()
 
@@ -70,7 +80,7 @@ export function IconPicker({ value, onChange }: IIconPickerProps) {
                     setShowIcons((v) => !v)
                 }}
             >
-                {createElement((mdIcons as Record<string, IconType>)[currentValue] as IconType, { size: 16 })}
+                <ActionIcon name={currentValue} size={16} />
             </Button>
             {showIcons && (
                 <div className={styles.icons}>
@@ -122,7 +132,7 @@ export function IconPicker({ value, onChange }: IIconPickerProps) {
                             if (!key) {
                                 return null
                             }
-                            const Icon = (mdIcons as Record<string, IconType>)[key] as IconType
+                            const Icon = (iconMap ?? {})[key] as IconType
                             return (
                                 <div key={key} style={style}>
                                     <Button

@@ -9,6 +9,7 @@ use active_win_pos_rs::get_active_window;
 use cocoa::appkit::NSWindow;
 use debug_print::debug_println;
 use enigo::*;
+#[cfg(not(target_os = "windows"))]
 use get_selected_text::get_selected_text;
 use mouse_position::mouse_position::Mouse;
 use serde_json::json;
@@ -17,7 +18,6 @@ use std::time::Duration;
 use tauri::{Emitter, Listener, LogicalPosition, Manager, PhysicalPosition};
 use tauri_plugin_updater::UpdaterExt;
 use tauri_specta::Event;
-use tokio::time::sleep;
 
 pub const TRANSLATOR_WIN_NAME: &str = "translator";
 pub const SETTINGS_WIN_NAME: &str = "settings";
@@ -121,6 +121,110 @@ pub fn get_translator_window_always_on_top() -> bool {
     ALWAYS_ON_TOP.load(Ordering::Acquire)
 }
 
+#[cfg(target_os = "windows")]
+enum SavedClipboard<'a> {
+    Text(String),
+    Image(arboard::ImageData<'a>),
+    Empty,
+}
+
+#[cfg(target_os = "windows")]
+fn save_clipboard() -> SavedClipboard<'static> {
+    match arboard::Clipboard::new() {
+        Ok(mut clipboard) => match clipboard.get_text() {
+            Ok(text) => SavedClipboard::Text(text),
+            Err(_) => match clipboard.get_image() {
+                Ok(image) => SavedClipboard::Image(image),
+                Err(_) => SavedClipboard::Empty,
+            },
+        },
+        Err(e) => {
+            eprintln!("Error opening clipboard: {}", e);
+            SavedClipboard::Empty
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn restore_clipboard(saved: SavedClipboard) {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        match saved {
+            SavedClipboard::Text(text) => {
+                let _ = clipboard.set_text(text);
+            }
+            SavedClipboard::Image(image) => {
+                let _ = clipboard.set_image(image);
+            }
+            SavedClipboard::Empty => {
+                let _ = clipboard.clear();
+            }
+        }
+    }
+}
+
+/// Capture the current selection by synthesizing Ctrl+C and reading the
+/// clipboard. The `get-selected-text` crate (and its vendored copy in
+/// utils.rs) guesses readiness with fixed sleeps (50ms before, 100ms
+/// after): when the focused app needs a moment longer to publish the
+/// selection, the read returns the placeholder, the empty result is
+/// dropped instead of sent, and the popup reopens still showing the
+/// previous translation. Instead, poll the clipboard sequence number
+/// until it actually changes, bounded at ~600ms.
+#[cfg(target_os = "windows")]
+fn read_selected_text() -> String {
+    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+
+    let saved = save_clipboard();
+    let sequence_before = unsafe { GetClipboardSequenceNumber() };
+
+    let mut enigo = match Enigo::new(&Settings::default()) {
+        Ok(enigo) => enigo,
+        Err(e) => {
+            eprintln!("Error creating enigo: {}", e);
+            return String::new();
+        }
+    };
+    // Release any stuck modifiers before synthesizing the copy.
+    let _ = enigo.key(Key::Control, Direction::Release);
+    let _ = enigo.key(Key::Alt, Direction::Release);
+    let _ = enigo.key(Key::Shift, Direction::Release);
+    let _ = enigo.key(Key::Control, Direction::Press);
+    let _ = enigo.key(Key::C, Direction::Click);
+    let _ = enigo.key(Key::Control, Direction::Release);
+
+    let mut changed = false;
+    for _ in 0..120 {
+        if unsafe { GetClipboardSequenceNumber() } != sequence_before {
+            changed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if !changed {
+        restore_clipboard(saved);
+        return String::new();
+    }
+    // Give apps that publish several formats (plain text, HTML, ...) a
+    // moment to finish before reading.
+    std::thread::sleep(Duration::from_millis(30));
+    let text = arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.get_text())
+        .unwrap_or_default();
+    restore_clipboard(saved);
+    text
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_selected_text() -> String {
+    match get_selected_text() {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("Error getting selected text natively: {}", e);
+            String::new()
+        }
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn show_translator_window_with_selected_text_command() {
@@ -130,15 +234,6 @@ pub async fn show_translator_window_with_selected_text_command() {
         .as_ref()
         .and_then(|conf| conf.restore_previous_position)
         .unwrap_or(false);
-    let read_selected_text = || -> String {
-        match get_selected_text() {
-            Ok(text) => text,
-            Err(e) => {
-                eprintln!("Error getting selected text natively: {}", e);
-                String::new()
-            }
-        }
-    };
 
     let selected_text = read_selected_text();
 
@@ -429,6 +524,33 @@ pub fn build_window<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     #[cfg(not(target_os = "macos"))]
     {
         let window = checked_build(builder.transparent(true).decorations(true));
+
+        post_process_window(&window);
+
+        window
+    }
+}
+
+/// Opaque variant for the standard resizable utility windows (Settings,
+/// History). Transparent WebView2 windows pay a heavy DirectComposition
+/// cost on every resize/maximize/close on Windows, which shows up as
+/// visible stutter; only the floating card/panel windows actually need
+/// transparency, so these plain windows are built opaque. They are also
+/// built undecorated: the pages paint their own headers (with drag
+/// regions and window controls), so the native caption bar would only
+/// duplicate them. Edge resizing still works - tao keeps handling the
+/// resize hit-test for undecorated resizable windows.
+pub fn build_opaque_window<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    builder: tauri::WebviewWindowBuilder<'a, R, M>,
+) -> tauri::WebviewWindow<R> {
+    #[cfg(target_os = "macos")]
+    {
+        build_window(builder)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let window = checked_build(builder.decorations(false));
 
         post_process_window(&window);
 
@@ -758,6 +880,9 @@ pub fn get_action_manager_window() -> tauri::WebviewWindow {
 pub async fn show_history_window() {
     let window = get_history_window();
     window.center().unwrap();
+    // Re-sync the controller before showing: the close handler hides the
+    // window and stops the webview from compositing.
+    set_webview_visibility(&window, true);
     window.show().unwrap();
     nudge_webview_visibility(&window);
 }
@@ -784,7 +909,7 @@ pub fn get_history_window() -> tauri::WebviewWindow {
             .skip_taskbar(true)
             .focused(true);
 
-            return build_window(builder);
+            return build_opaque_window(builder);
         }
     };
 
@@ -794,6 +919,9 @@ pub fn get_history_window() -> tauri::WebviewWindow {
 pub fn show_settings_window() {
     let window = get_settings_window();
     window.center().unwrap();
+    // Re-sync the controller before showing: the close handler hides the
+    // window and stops the webview from compositing.
+    set_webview_visibility(&window, true);
     window.show().unwrap();
     nudge_webview_visibility(&window);
 }
@@ -820,7 +948,7 @@ pub fn get_settings_window() -> tauri::WebviewWindow {
             .skip_taskbar(true)
             .focused(true);
 
-            return build_window(builder);
+            return build_opaque_window(builder);
         }
     };
 
@@ -912,7 +1040,7 @@ pub fn get_inline_lookup_window() -> tauri::WebviewWindow {
             window
         }
         None => {
-            #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+            #[allow(unused_mut)]
             let mut builder = tauri::WebviewWindowBuilder::new(
                 handle,
                 INLINE_LOOKUP_WIN_NAME,

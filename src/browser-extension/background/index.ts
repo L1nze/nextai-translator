@@ -5,7 +5,6 @@ import { BackgroundFetchRequestMessage, BackgroundFetchResponseMessage } from '.
 import { vocabularyInternalService } from '../../common/internal-services/vocabulary'
 import { actionInternalService } from '../../common/internal-services/action'
 import { historyInternalService } from '../../common/internal-services/history'
-import { optionsPageHeaderPromotionIDKey, optionsPageOpenaiAPIKeyPromotionIDKey } from '../common'
 import { chatgptArkoseReqParams } from '@/common/constants'
 import { keyChatgptArkoseReqForm, keyChatgptArkoseReqUrl } from '@/common/engines/chatgpt'
 import { keyKimiAccessToken } from '@/common/engines/kimi'
@@ -154,10 +153,6 @@ browser.runtime.onMessage.addListener(async (request) => {
         case BackgroundEventNames.removeItem:
             return await browser.storage.local.remove(request.key)
         case 'openOptionsPage':
-            await browser.storage.local.set({
-                [optionsPageOpenaiAPIKeyPromotionIDKey]: request.openaiAPIKeyPromotionID,
-            })
-            await browser.storage.local.set({ [optionsPageHeaderPromotionIDKey]: request.headerPromotionID })
             browser.runtime.openOptionsPage()
             return
     }

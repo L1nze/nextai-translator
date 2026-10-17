@@ -14,6 +14,13 @@ export interface IMessageRequest {
     commandPrompt: string
     modelOverride?: string
     thinkingBudget?: number
+    // Raw translation payload for non-LLM engines (free machine-translation
+    // services read the original text and language codes from these instead
+    // of parsing the LLM prompts). LLM engines ignore them.
+    sourceText?: string
+    fromLang?: string
+    toLang?: string
+    mode?: string
     onMessage: (message: { content: string; role: string; isFullText?: boolean }) => Promise<void>
     onError: (error: string) => void
     onFinished: (reason: string) => void

@@ -1,4 +1,14 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import React, {
+    Suspense,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useReducer,
+    useRef,
+    useState,
+    lazy,
+} from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import toast from 'react-hot-toast/headless'
 import { Client as Styletron } from 'styletron-engine-atomic'
@@ -9,9 +19,8 @@ import { createUseStyles } from 'react-jss'
 import { AiOutlineFileSync } from 'react-icons/ai'
 import { IoSettingsOutline, IoChevronBackOutline, IoChevronForwardOutline } from 'react-icons/io5'
 import { TiArrowBack } from 'react-icons/ti'
-import { TbArrowsExchange, TbCsv } from 'react-icons/tb'
-import { MdOutlineGrade, MdGrade, MdHistory, MdBrowserUpdated } from 'react-icons/md'
-import * as mdIcons from 'react-icons/md'
+import { TbArrowsExchange } from 'react-icons/tb'
+import { MdOutlineGrade, MdGrade, MdHistory } from './local-md-icons'
 import { StatefulTooltip } from 'baseui-sd/tooltip'
 import { detectLang, getLangConfig, sourceLanguages, targetLanguages, LangCode } from '../lang'
 import { translate, TranslateMode } from '../translate'
@@ -22,57 +31,35 @@ import { clsx } from 'clsx'
 import { Button } from 'baseui-sd/button'
 import { ErrorBoundary } from 'react-error-boundary'
 import { ErrorFallback } from '../components/ErrorFallback'
-import {
-    defaultAPIURL,
-    exportToCsv,
-    isDesktopApp,
-    isTauri,
-    getAssetUrl,
-    isUserscript,
-    setSettings,
-    isBrowserExtensionContentScript,
-    isMacOS,
-} from '../utils'
-import { InnerSettings } from './Settings'
+import { isDesktopApp, isTauri, isUserscript, setSettings, isBrowserExtensionContentScript, isMacOS } from '../utils'
 import { containerID, popupCardInnerContainerId } from '../../browser-extension/content_script/consts'
 import Dropzone from 'react-dropzone'
-import { RecognizeResult, createWorker } from 'tesseract.js'
+import type { RecognizeResult } from 'tesseract.js'
 import { BsTextareaT } from 'react-icons/bs'
-import { FcIdea } from 'react-icons/fc'
-import rocket from '../assets/images/rocket.gif'
-import partyPopper from '../assets/images/party-popper.gif'
 import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event'
-import IpLocationNotification from '../components/IpLocationNotification'
 import { HighlightInTextarea } from '../highlight-in-textarea'
 import { LRUCache } from 'lru-cache'
 import { ISettings, IThemedStyleProps } from '../types'
 import { useTheme } from '../hooks/useTheme'
 import { Tooltip } from './Tooltip'
 import { useSettings } from '../hooks/useSettings'
-import Vocabulary from './Vocabulary'
 import { useCollectedWordTotal } from '../hooks/useCollectedWordTotal'
 import { Modal, ModalBody, ModalHeader } from 'baseui-sd/modal'
 import { vocabularyService } from '../services/vocabulary'
-import { Action, VocabularyItem, HistoryItem } from '../internal-services/db'
+import { Action, HistoryItem } from '../internal-services/db'
 import { CopyButton } from './CopyButton'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { actionService } from '../services/action'
 import { historyService } from '../services/history'
-import { ActionManager } from './ActionManager'
-import { TranslationHistory } from './TranslationHistory'
 import { GrMoreVertical } from 'react-icons/gr'
 import { StatefulPopover } from 'baseui-sd/popover'
 import { StatefulMenu } from 'baseui-sd/menu'
-import { IconType } from 'react-icons'
 import { GiPlatform } from 'react-icons/gi'
 import { IoIosRocket } from 'react-icons/io'
-import 'katex/dist/katex.min.css'
-import Latex from 'react-latex-next'
 import { Markdown } from './Markdown'
 import useResizeObserver from 'use-resize-observer'
 import _ from 'underscore'
 import { GlobalSuspense } from './GlobalSuspense'
-import { useLazyEffect } from '../usehooks'
 import LogoWithText, { type LogoWithTextRef } from './LogoWithText'
 import Toaster from './Toaster'
 import { PhoneticText } from './PhoneticText'
@@ -81,21 +68,21 @@ import { readFile } from '@tauri-apps/plugin-fs'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useDeepCompareCallback } from 'use-deep-compare'
 import { useTranslatorStore, setStoreTranslatedText, setStoreIsTranslating } from '../store'
-import useSWR from 'swr'
-import {
-    IPromotionResponse,
-    checkShouldShowPromotionNotification,
-    fetchPromotions,
-    choicePromotionItem,
-    IPromotionItem,
-} from '../services/promotion'
-import { usePromotionShowed } from '../hooks/usePromotionShowed'
 import { SpeakerIcon } from './SpeakerIcon'
-import { HoverableText, WordHoverProvider } from './WordHoverCard'
 import { Provider, engineIcons, getEngine, providerToEngine } from '../engines'
 import color from 'color'
 import { useAtom } from 'jotai'
 import { showSettingsAtom } from '../store/setting'
+import { ActionIcon } from './ActionIcon'
+
+// Heavy, rarely-needed subtrees are split into their own chunks so opening the
+// translator window never parses the settings page, the action manager, the
+// vocabulary book, the history panel or KaTeX up front.
+const InnerSettings = lazy(() => import('./Settings').then((m) => ({ default: m.InnerSettings })))
+const Vocabulary = lazy(() => import('./Vocabulary'))
+const ActionManager = lazy(() => import('./ActionManager').then((m) => ({ default: m.ActionManager })))
+const TranslationHistory = lazy(() => import('./TranslationHistory').then((m) => ({ default: m.TranslationHistory })))
+const LatexRenderer = lazy(() => import('./LatexRenderer'))
 
 const cache = new LRUCache({
     max: 500,
@@ -153,39 +140,6 @@ const useStyles = createUseStyles({
         flexDirection: 'row',
         alignItems: 'center',
         gap: '8px',
-    },
-    'updateButton': (props: IThemedStyleProps) => ({
-        'height': '24px',
-        'padding': '0 11px',
-        'border': 'none',
-        'borderRadius': '999px',
-        'background': props.themeType === 'dark' ? 'rgba(76, 132, 255, 0.16)' : 'rgba(39, 110, 241, 0.09)',
-        'color': props.themeType === 'dark' ? props.theme.colors.accent200 : props.theme.colors.accent,
-        'cursor': 'pointer',
-        'display': 'flex',
-        'alignItems': 'center',
-        'gap': '5px',
-        'fontFamily': 'inherit',
-        'fontSize': '11px',
-        'fontWeight': 500,
-        'lineHeight': 1,
-        'whiteSpace': 'nowrap',
-        'transition': 'background 160ms ease',
-        '&:hover': {
-            background: props.themeType === 'dark' ? 'rgba(76, 132, 255, 0.24)' : 'rgba(39, 110, 241, 0.14)',
-        },
-        '&:active': {
-            background: props.themeType === 'dark' ? 'rgba(76, 132, 255, 0.3)' : 'rgba(39, 110, 241, 0.18)',
-        },
-        '&:focus-visible': {
-            outline: `2px solid ${props.theme.colors.accent}`,
-            outlineOffset: '2px',
-        },
-    }),
-    'updateVersion': {
-        opacity: 0.65,
-        fontWeight: 400,
-        fontVariantNumeric: 'tabular-nums',
     },
     'poweredBy': (props: IThemedStyleProps) => ({
         fontSize: props.theme.sizing.scale300,
@@ -351,12 +305,6 @@ const useStyles = createUseStyles({
         '-webkit-user-select': 'none',
         'user-select': 'none',
     }),
-    'tokenCount': (props: IThemedStyleProps) => ({
-        color: props.theme.colors.contentTertiary,
-        fontSize: '12px',
-        fontFamily: 'monospace',
-        opacity: 0.7,
-    }),
     'actionStr': (props: IThemedStyleProps) => ({
         position: 'absolute',
         display: 'flex',
@@ -455,11 +403,6 @@ const useStyles = createUseStyles({
         padding: '6px',
         borderRadius: '8px',
         opacity: 0.4,
-    }),
-    'enterHint': (props: IThemedStyleProps) => ({
-        color: props.theme.colors.contentTertiary,
-        fontSize: '11px',
-        opacity: 0.7,
     }),
     'writing': {
         'marginLeft': '3px',
@@ -666,42 +609,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
 
     const [showActionManager, setShowActionManager] = useState(false)
     const [isHistoryOpen, setIsHistoryOpen] = useState(false)
-    const [availableUpdate, setAvailableUpdate] = useState<{ version: string } | null>(null)
-
-    useEffect(() => {
-        if (!isTauri()) {
-            return undefined
-        }
-
-        let disposed = false
-        let unlistenUpdateStatus: UnlistenFn | undefined
-
-        listen<{ version: string } | null>('update-status-changed', ({ payload }) => {
-            if (!disposed) {
-                setAvailableUpdate(payload)
-            }
-        }).then((unlisten) => {
-            if (disposed) {
-                unlisten()
-                return
-            }
-            unlistenUpdateStatus = unlisten
-        })
-
-        import('@/tauri/bindings')
-            .then(({ commands }) => commands.getUpdateResult())
-            .then(([hasChecked, result]) => {
-                if (!disposed && hasChecked) {
-                    setAvailableUpdate(result)
-                }
-            })
-            .catch((error) => console.error('Failed to read update status', error))
-
-        return () => {
-            disposed = true
-            unlistenUpdateStatus?.()
-        }
-    }, [])
 
     const [translationFlag, forceTranslate] = useReducer((x: number) => x + 1, 0)
     const translationIDRef = useRef(0)
@@ -714,7 +621,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
     const [selectedWord, setSelectedWord] = useState('')
     const [vocabularyType, setVocabularyType] = useState<'hide' | 'vocabulary' | 'article'>('hide')
     const highlightRef = useRef<HighlightInTextarea | null>(null)
-    const [showWordbookButtons, setShowWordbookButtons] = useState(false)
     const { t, i18n } = useTranslation()
     const { settings } = useSettings()
 
@@ -816,6 +722,10 @@ function InnerTranslator(props: IInnerTranslatorProps) {
     }, [selectedWord, highlightWords, speakingInputRange])
 
     const [activateAction, setActivateAction] = useState<Action>()
+    const activateActionRef = useRef(activateAction)
+    useEffect(() => {
+        activateActionRef.current = activateAction
+    }, [activateAction])
 
     const currentTranslateMode = useMemo(() => {
         editorRef.current?.focus()
@@ -998,9 +908,7 @@ function InnerTranslator(props: IInnerTranslatorProps) {
     })
     const [isLoading, setIsLoading] = useState(false)
     const [editableText, setEditableText] = useState('')
-    const [tokenCount, setTokenCount] = useState(0)
     const [translatedText, setTranslatedText] = useState('')
-    const [translatedLines, setTranslatedLines] = useState<string[]>([])
     const [speakingOutputRange, setSpeakingOutputRange] = useState<[number, number]>()
     const [isWordMode, setIsWordMode] = useState(false)
     const isWordModeRef = useRef(false)
@@ -1018,13 +926,22 @@ function InnerTranslator(props: IInnerTranslatorProps) {
         setStoreIsTranslating(isLoading)
     }, [isLoading])
 
-    // Emit streaming translation to inline lookup window (desktop only)
+    // Emit streaming translation to inline lookup window (desktop only).
+    // Throttled: the inline window only needs progress, not every flush, and
+    // emitting the full accumulated text a dozen times a second is pure IPC
+    // overhead when that window does not even exist.
+    const lastInlineEmitRef = useRef(0)
     useEffect(() => {
         if (!isDesktopApp()) return
         const done = !isLoading && translatedText !== ''
-        import('@tauri-apps/api/event').then(({ emitTo }) => {
-            emitTo('inline_lookup', 'translated-text-chunk', { text: translatedText, done })
-        })
+        const now = Date.now()
+        if (!done && now - lastInlineEmitRef.current < 400) return
+        lastInlineEmitRef.current = now
+        import('@tauri-apps/api/event')
+            .then(({ emitTo }) => emitTo('inline_lookup', 'translated-text-chunk', { text: translatedText, done }))
+            .catch(() => {
+                // The lookup window may not exist; nothing to do then.
+            })
     }, [translatedText, isLoading])
 
     const [translateDeps, setTranslateDeps] = useState<{
@@ -1104,47 +1021,54 @@ function InnerTranslator(props: IInnerTranslatorProps) {
         [settings.defaultTargetLanguage]
     )
 
-    const { externalOriginalText } = useTranslatorStore()
+    const externalOriginalText = useTranslatorStore((s) => s.externalOriginalText)
+    const lastExternalTextRef = useRef<string | undefined>(undefined)
 
     useEffect(() => {
         if (externalOriginalText === undefined) {
             return
         }
-        setActivateAction((action) => {
-            if (!action) {
-                setTranslateDeps((v) => {
-                    return {
-                        ...v,
-                        text: externalOriginalText,
-                    }
-                })
-                return action
-            }
-            setEditableText(externalOriginalText)
-            getTranslateDeps(externalOriginalText, action).then((v) => {
-                setTranslateDeps(v)
+        const isNewText = lastExternalTextRef.current !== externalOriginalText
+        lastExternalTextRef.current = externalOriginalText
+        if (isNewText) {
+            // Drop the previous translation right away: computing the deps
+            // involves async language detection, and leaving the old output
+            // on screen during that window reads like a stale result.
+            resetStreamBuffer()
+            setTranslatedText('')
+            setActionStr('')
+            setErrorMessage('')
+        }
+        // Resolve the action from a ref instead of nesting this work
+        // inside a setActivateAction updater: updaters only run when React
+        // renders, and a just-(re)shown window can defer that render long
+        // enough for this chain to be silently dropped - the same trap
+        // getTranslateDeps documents above.
+        const action = activateActionRef.current
+        if (!action) {
+            setTranslateDeps((v) => {
+                return {
+                    ...v,
+                    text: externalOriginalText,
+                }
             })
-            return action
-        })
+        } else {
+            setEditableText(externalOriginalText)
+            getTranslateDeps(externalOriginalText, action)
+                .then((v) => {
+                    setTranslateDeps(v)
+                })
+                .catch((e) => {
+                    console.error('Failed to compute translate deps', e)
+                })
+        }
         setSelectedWord('')
         setHighlightWords([])
-    }, [externalOriginalText, getTranslateDeps, props.uuid])
+    }, [externalOriginalText, getTranslateDeps, props.uuid, resetStreamBuffer])
 
     useEffect(() => {
         setEditableText(translateDeps.text)
     }, [translateDeps.text])
-
-    useLazyEffect(
-        () => {
-            ;(async () => {
-                // use dynamic import to reduce bundle size
-                const { countTokens } = await import('../token')
-                setTokenCount(countTokens(editableText, settings?.apiModel))
-            })()
-        },
-        [editableText],
-        500
-    )
 
     const checkWordCollection = useCallback(async () => {
         try {
@@ -1163,8 +1087,18 @@ function InnerTranslator(props: IInnerTranslatorProps) {
         }
     }, [editableText])
 
-    useEffect(() => {
-        setTranslatedLines(translatedText.split('\n'))
+    // Derived once per text change (used to by an effect + state, which cost
+    // an extra render per stream flush). The prefix sums replace a per-line
+    // slice+reduce that made plain-text rendering O(n^2) in the line count.
+    const { translatedLines, translatedLineStarts } = useMemo(() => {
+        const lines = translatedText.split('\n')
+        const starts: number[] = []
+        let acc = 0
+        for (const line of lines) {
+            starts.push(acc)
+            acc += line.length + 1
+        }
+        return { translatedLines: lines, translatedLineStarts: starts }
     }, [translatedText])
     useEffect(() => {
         isWordModeRef.current = isWordMode
@@ -1323,7 +1257,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                 stopLoading()
                 return
             }
-            setShowWordbookButtons(false)
             const actionMode = action.mode
             const actionStrItem = actionMode
                 ? actionStrItems[actionMode]
@@ -1353,7 +1286,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                     if (historyEntryIdRef.current !== null) {
                         await historyService.update(historyEntryIdRef.current, {
                             translatedText: resultText,
-                            tokenCount,
                         })
                     } else {
                         const history = await historyService.create({
@@ -1367,7 +1299,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                             provider: translateDeps.provider ?? settings.provider,
                             engineModel: translateDeps.engineModel ?? settings.apiModel,
                             wordMode: isWordModeRef.current,
-                            tokenCount,
                         })
                         historyEntryIdRef.current = history.id ?? null
                     }
@@ -1527,7 +1458,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
             setTranslatedText(item.translatedText)
             setActionStr('')
             setErrorMessage('')
-            setShowWordbookButtons(false)
             setSelectedWord('')
             setHighlightWords([])
             const prev = translateDepsRef.current
@@ -1676,7 +1606,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
             setIsWordMode(entry.isWordMode)
             setActionStr('')
             setErrorMessage('')
-            setShowWordbookButtons(false)
             setSelectedWord('')
             setHighlightWords([])
             const prev = translateDepsRef.current
@@ -1856,6 +1785,7 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                 // Create the worker only after validation and always
                 // terminate it: leaked Tesseract workers keep pumping
                 // messages and pile up listeners, dragging the whole UI.
+                const { createWorker } = await import('tesseract.js')
                 const worker = await createWorker()
                 try {
                     await worker.loadLanguage('eng+chi_sim+chi_tra+jpn+rus+kor')
@@ -1909,6 +1839,7 @@ function InnerTranslator(props: IInnerTranslatorProps) {
         // Create the worker only after validation and always terminate it:
         // leaked Tesseract workers keep pumping messages and pile up
         // listeners, dragging the whole UI.
+        const { createWorker } = await import('tesseract.js')
         const worker = await createWorker()
         try {
             await worker.loadLanguage('eng+chi_sim+chi_tra+jpn+rus+kor')
@@ -1923,21 +1854,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
         } finally {
             setIsOCRProcessing(false)
             await worker.terminate()
-        }
-    }
-
-    const onCsvExport = async () => {
-        try {
-            const words = await vocabularyService.listItems()
-            await exportToCsv<VocabularyItem>(`nextai-translator-collection-${new Date().valueOf()}`, words)
-            if (isDesktopApp()) {
-                toast(t('CSV file saved on Desktop'), {
-                    duration: 5000,
-                    icon: '👏',
-                })
-            }
-        } catch (e) {
-            console.error(e)
         }
     }
 
@@ -1978,32 +1894,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
             })
         }
     }, [t, translatedText])
-
-    const handleOpenWordDetails = useCallback(
-        async (word: string) => {
-            const translateAction = actions?.find((action) => action.mode === 'translate') ?? activateAction
-            if (!translateAction) {
-                return
-            }
-            setSelectedWord('')
-            setHighlightWords([])
-            setVocabularyType('hide')
-            setShowSettings(false)
-            setEditableText(word)
-            if (translateAction.id !== activateAction?.id || translateAction.mode !== activateAction?.mode) {
-                setActivateAction(translateAction)
-            }
-            const newTranslateDeps = await getTranslateDeps(word, translateAction)
-            setTranslateDeps({
-                ...newTranslateDeps,
-                action: translateAction,
-            })
-            editorRef.current?.focus()
-        },
-        [actions, activateAction, getTranslateDeps, setShowSettings]
-    )
-
-    const renderHoverableText = useCallback((text: string) => <HoverableText>{text}</HoverableText>, [])
 
     // Window-level keyboard shortcut for "Insert into previous input"
     // — ⇧⌘↩ on macOS, Ctrl+Shift+Enter elsewhere. Mirrors the toolbar button.
@@ -2141,87 +2031,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
         [actions, activateAction, editableText, getTranslateDeps, t]
     )
 
-    const { data: promotions, mutate: refetchPromotions } = useSWR<IPromotionResponse>(
-        ['promotions', showSettings],
-        fetchPromotions
-    )
-
-    useEffect(() => {
-        const timer = setInterval(
-            () => {
-                refetchPromotions()
-            },
-            1000 * 60 * 10
-        )
-        return () => {
-            clearInterval(timer)
-        }
-    }, [refetchPromotions])
-
-    useEffect(() => {
-        if (!isTauri()) {
-            return undefined
-        }
-        let unlisten: UnlistenFn | undefined
-        const appWindow = WebviewWindow.getCurrent()
-        appWindow
-            .listen('tauri://focus', () => {
-                refetchPromotions()
-            })
-            .then((cb: UnlistenFn) => {
-                unlisten = cb
-            })
-        return () => {
-            unlisten?.()
-        }
-    }, [refetchPromotions])
-
-    const [openaiAPIKeyPromotion, setOpenaiAPIKeyPromotion] = useState<IPromotionItem>()
-    const [settingsHeaderPromotion, setSettingsHeaderPromotion] = useState<IPromotionItem>()
-
-    useEffect(() => {
-        choicePromotionItem(promotions?.openai_api_key).then(setOpenaiAPIKeyPromotion)
-        choicePromotionItem(promotions?.settings_header).then(setSettingsHeaderPromotion)
-        if (!isTauri()) {
-            const timer = setInterval(() => {
-                choicePromotionItem(promotions?.openai_api_key).then(setOpenaiAPIKeyPromotion)
-                choicePromotionItem(promotions?.settings_header).then(setSettingsHeaderPromotion)
-            }, 1000 * 60)
-            return () => {
-                clearInterval(timer)
-            }
-        }
-        let unlisten: UnlistenFn | undefined
-        const appWindow = WebviewWindow.getCurrent()
-        appWindow
-            .listen('tauri://focus', () => {
-                choicePromotionItem(promotions?.openai_api_key).then(setOpenaiAPIKeyPromotion)
-                choicePromotionItem(promotions?.settings_header).then(setSettingsHeaderPromotion)
-            })
-            .then((cb: UnlistenFn) => {
-                unlisten = cb
-            })
-        return () => {
-            unlisten?.()
-        }
-    }, [promotions?.openai_api_key, promotions?.settings_header])
-
-    const { promotionShowed: openaiAPIKeyPromotionShowed } = usePromotionShowed(openaiAPIKeyPromotion)
-    const { promotionShowed: settingsHeaderPromotionShowed } = usePromotionShowed(settingsHeaderPromotion)
-
-    const [shouldShowPromotionNotification, setShouldShowPromotionNotification] = useState(false)
-
-    useEffect(() => {
-        checkShouldShowPromotionNotification().then(setShouldShowPromotionNotification)
-        const ms = 1000 * 60 * 5
-        const timer = setInterval(() => {
-            checkShouldShowPromotionNotification().then(setShouldShowPromotionNotification)
-        }, ms)
-        return () => {
-            clearInterval(timer)
-        }
-    }, [showSettings])
-
     const getFooterBackgroundColor = useCallback(() => {
         if (settings.enableBackgroundBlur) {
             return 'transparent !important'
@@ -2243,13 +2052,13 @@ function InnerTranslator(props: IInnerTranslatorProps) {
             }}
         >
             {showSettings && (
-                <InnerSettings
-                    onSave={(oldSettings) => {
-                        props.onSettingsSave?.(oldSettings)
-                    }}
-                    headerPromotionID={settingsHeaderPromotion?.id}
-                    openaiAPIKeyPromotionID={openaiAPIKeyPromotion?.id}
-                />
+                <Suspense fallback={null}>
+                    <InnerSettings
+                        onSave={(oldSettings) => {
+                            props.onSettingsSave?.(oldSettings)
+                        }}
+                    />
+                </Suspense>
             )}
             <div
                 style={{
@@ -2383,10 +2192,7 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                                 }
                                             }}
                                         >
-                                            {action.icon &&
-                                                React.createElement(mdIcons[action.icon as keyof typeof mdIcons], {
-                                                    size: 15,
-                                                })}
+                                            {action.icon && <ActionIcon name={action.icon} size={15} />}
                                             {action.id === activateAction?.id && (
                                                 <div
                                                     style={{
@@ -2444,14 +2250,7 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                                                     gap: 6,
                                                                 }}
                                                             >
-                                                                {action.icon
-                                                                    ? React.createElement(
-                                                                          (mdIcons as Record<string, IconType>)[
-                                                                              action.icon
-                                                                          ],
-                                                                          { size: 15 }
-                                                                      )
-                                                                    : undefined}
+                                                                <ActionIcon name={action.icon} size={15} />
                                                                 {action.mode ? t(action.name) : action.name}
                                                             </div>
                                                         ),
@@ -2492,11 +2291,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                             settings.enableBackgroundBlur && styles.popupCardContentContainerBackgroundBlur
                         )}
                     >
-                        {settings?.apiURL === defaultAPIURL && (
-                            <div>
-                                <IpLocationNotification showSettings={showSettings} />
-                            </div>
-                        )}
                         <div ref={editorContainerRef} className={styles.popupCardEditorContainer}>
                             <div
                                 style={{
@@ -2535,23 +2329,12 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                                 >
                                                     {isOCRProcessing ? 'OCR Processing...' : 'OCR Success'}
                                                 </div>
-                                                {showOCRProcessing && (
-                                                    <div>
-                                                        <img
-                                                            src={
-                                                                isOCRProcessing
-                                                                    ? getAssetUrl(rocket)
-                                                                    : getAssetUrl(partyPopper)
-                                                            }
-                                                            width='20'
-                                                        />{' '}
-                                                    </div>
-                                                )}
                                             </div>
                                         )}
                                         <Textarea
                                             inputRef={editorRef}
                                             autoFocus={autoFocus}
+                                            placeholder='Press Enter to translate, Shift+Enter for a new line'
                                             overrides={{
                                                 Root: {
                                                     style: {
@@ -2640,7 +2423,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                                 overflow: 'hidden',
                                             }}
                                         >
-                                            <div className={styles.tokenCount}> {tokenCount} </div>
                                             <div className={styles.flexPlaceHolder} />
                                             <div
                                                 style={{
@@ -2650,9 +2432,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                                     gap: 10,
                                                 }}
                                             >
-                                                <div className={styles.enterHint}>
-                                                    {'Press <Enter> to submit, <Shift+Enter> for a new line.'}
-                                                </div>
                                                 <Button
                                                     size='mini'
                                                     onClick={handleSubmit}
@@ -2706,37 +2485,11 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                         >
                                             <div
                                                 className={styles.actionButton}
-                                                onClick={() => setShowWordbookButtons((e) => !e)}
+                                                onClick={() => setVocabularyType('vocabulary')}
                                             >
                                                 <AiOutlineFileSync size={15} />
                                             </div>
                                         </StatefulTooltip>
-                                    )}
-                                    {showWordbookButtons && (
-                                        <>
-                                            <StatefulTooltip content={t('Collection Review')} showArrow placement='top'>
-                                                <div className={styles.actionButton}>
-                                                    <MdGrade
-                                                        size={15}
-                                                        onClick={() => setVocabularyType('vocabulary')}
-                                                    />
-                                                </div>
-                                            </StatefulTooltip>
-                                            <StatefulTooltip
-                                                content={t('Export your collection as a csv file')}
-                                                showArrow
-                                                placement='top'
-                                            >
-                                                <div className={styles.actionButton} onClick={onCsvExport}>
-                                                    <TbCsv size={15} />
-                                                </div>
-                                            </StatefulTooltip>
-                                            <StatefulTooltip content='Big Bang' showArrow placement='top'>
-                                                <div className={styles.actionButton}>
-                                                    <FcIdea size={15} onClick={() => setVocabularyType('article')} />
-                                                </div>
-                                            </StatefulTooltip>
-                                        </>
                                     )}
                                 </>
                                 <div style={{ marginLeft: 'auto' }}></div>
@@ -2826,16 +2579,7 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                         })}
                                     >
                                         <div>{actionStr}</div>
-                                        {isLoading ? (
-                                            <span className={styles.writing} key={'1'} />
-                                        ) : errorMessage ? (
-                                            <span key={'2'}>😢</span>
-                                        ) : translateControllerRef.current?.signal.aborted &&
-                                          translateControllerRef.current?.signal.reason === 'stop' ? (
-                                            <span key={'3'}>⏹️</span>
-                                        ) : (
-                                            <span key={'4'}>👍</span>
-                                        )}
+                                        {isLoading ? <span className={styles.writing} key={'1'} /> : null}
                                     </div>
                                 )}
                                 {errorMessage ? (
@@ -2879,177 +2623,152 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                             width: '100%',
                                         }}
                                     >
-                                        <WordHoverProvider enabled={!isLoading} onOpenDetails={handleOpenWordDetails}>
-                                            <div
-                                                ref={translatedContentRef}
-                                                className={styles.popupCardTranslatedContentContainer}
-                                                style={{
-                                                    fontSize: settings.fontSize,
-                                                }}
-                                            >
-                                                <div>
-                                                    {currentTranslateMode === 'explain-code' ||
-                                                    activateAction?.outputRenderingFormat === 'markdown' ? (
-                                                        <>
-                                                            <Markdown
-                                                                // Skip per-word hover/phonetic wrapping while
-                                                                // streaming: it multiplies the cost of each
-                                                                // incremental re-render and freezes the UI on
-                                                                // long outputs. The final render restores it.
-                                                                renderText={isLoading ? undefined : renderHoverableText}
-                                                                speechLang={
-                                                                    isLoading
-                                                                        ? undefined
-                                                                        : isWordMode
-                                                                        ? sourceLang
-                                                                        : targetLang ?? 'en'
-                                                                }
-                                                                speechText={editableText}
-                                                                ttsProvider={settings.tts?.provider}
-                                                                ttsVoice={
-                                                                    settings.tts?.voices?.find(
-                                                                        (item) =>
-                                                                            item.lang ===
-                                                                            (isWordMode
-                                                                                ? sourceLang
-                                                                                : targetLang ?? 'en')
-                                                                    )?.voice
-                                                                }
-                                                                ttsRate={settings.tts?.rate}
-                                                                ttsVolume={settings.tts?.volume}
-                                                            >
-                                                                {translatedText}
-                                                            </Markdown>
-                                                            {isLoading && <span className={styles.caret} />}
-                                                        </>
-                                                    ) : activateAction?.outputRenderingFormat === 'latex' ? (
-                                                        <>
-                                                            <Latex>{translatedText}</Latex>
-                                                            {isLoading && <span className={styles.caret} />}
-                                                        </>
-                                                    ) : (
-                                                        translatedLines.map((line, i) => {
-                                                            const lineStart = translatedLines
-                                                                .slice(0, i)
-                                                                .reduce((length, item) => length + item.length + 1, 0)
-                                                            const lineHighlightRange = speakingOutputRange
-                                                                ? ([
-                                                                      Math.max(0, speakingOutputRange[0] - lineStart),
-                                                                      Math.min(
-                                                                          line.length,
-                                                                          speakingOutputRange[1] - lineStart
-                                                                      ),
-                                                                  ] as [number, number])
-                                                                : undefined
-                                                            return (
-                                                                <div className={styles.paragraph} key={`p-${i}`}>
-                                                                    {isWordMode && i === 0 ? (
-                                                                        <div
-                                                                            style={{
-                                                                                display: 'flex',
-                                                                                alignItems: 'center',
-                                                                                gap: '5px',
-                                                                            }}
-                                                                        >
-                                                                            {isLoading ? (
-                                                                                line
-                                                                            ) : (
-                                                                                <PhoneticText
-                                                                                    text={line}
-                                                                                    fallbackText={editableText}
-                                                                                    highlightRange={lineHighlightRange}
-                                                                                    lang={sourceLang}
-                                                                                    provider={settings.tts?.provider}
-                                                                                    voice={
-                                                                                        settings.tts?.voices?.find(
-                                                                                            (item) =>
-                                                                                                item.lang === sourceLang
-                                                                                        )?.voice
+                                        <div
+                                            ref={translatedContentRef}
+                                            className={styles.popupCardTranslatedContentContainer}
+                                            style={{
+                                                fontSize: settings.fontSize,
+                                            }}
+                                        >
+                                            <div>
+                                                {currentTranslateMode === 'explain-code' ||
+                                                activateAction?.outputRenderingFormat === 'markdown' ? (
+                                                    <>
+                                                        <Markdown
+                                                            speechLang={
+                                                                isLoading
+                                                                    ? undefined
+                                                                    : isWordMode
+                                                                    ? sourceLang
+                                                                    : targetLang ?? 'en'
+                                                            }
+                                                            speechText={translateDeps.text}
+                                                            ttsProvider={settings.tts?.provider}
+                                                            ttsVoice={
+                                                                settings.tts?.voices?.find(
+                                                                    (item) =>
+                                                                        item.lang ===
+                                                                        (isWordMode ? sourceLang : targetLang ?? 'en')
+                                                                )?.voice
+                                                            }
+                                                            ttsRate={settings.tts?.rate}
+                                                            ttsVolume={settings.tts?.volume}
+                                                        >
+                                                            {translatedText}
+                                                        </Markdown>
+                                                        {isLoading && <span className={styles.caret} />}
+                                                    </>
+                                                ) : activateAction?.outputRenderingFormat === 'latex' ? (
+                                                    <>
+                                                        <Suspense fallback={null}>
+                                                            <LatexRenderer>{translatedText}</LatexRenderer>
+                                                        </Suspense>
+                                                        {isLoading && <span className={styles.caret} />}
+                                                    </>
+                                                ) : (
+                                                    translatedLines.map((line, i) => {
+                                                        const lineStart = translatedLineStarts[i]
+                                                        const lineHighlightRange = speakingOutputRange
+                                                            ? ([
+                                                                  Math.max(0, speakingOutputRange[0] - lineStart),
+                                                                  Math.min(
+                                                                      line.length,
+                                                                      speakingOutputRange[1] - lineStart
+                                                                  ),
+                                                              ] as [number, number])
+                                                            : undefined
+                                                        return (
+                                                            <div className={styles.paragraph} key={`p-${i}`}>
+                                                                {isWordMode && i === 0 ? (
+                                                                    <div
+                                                                        style={{
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            gap: '5px',
+                                                                        }}
+                                                                    >
+                                                                        {isLoading ? (
+                                                                            line
+                                                                        ) : (
+                                                                            <PhoneticText
+                                                                                text={line}
+                                                                                fallbackText={translateDeps.text}
+                                                                                highlightRange={lineHighlightRange}
+                                                                                lang={sourceLang}
+                                                                                provider={settings.tts?.provider}
+                                                                                voice={
+                                                                                    settings.tts?.voices?.find(
+                                                                                        (item) =>
+                                                                                            item.lang === sourceLang
+                                                                                    )?.voice
+                                                                                }
+                                                                                rate={settings.tts?.rate}
+                                                                                volume={settings.tts?.volume}
+                                                                            />
+                                                                        )}
+                                                                        {!isLoading && (
+                                                                            <StatefulTooltip
+                                                                                content={
+                                                                                    isCollectedWord
+                                                                                        ? t('Remove from collection')
+                                                                                        : t('Add to collection')
+                                                                                }
+                                                                                showArrow
+                                                                                placement='right'
+                                                                            >
+                                                                                <div
+                                                                                    className={styles.actionButton}
+                                                                                    onClick={() =>
+                                                                                        onWordCollection(
+                                                                                            isCollectedWord
+                                                                                        )
                                                                                     }
-                                                                                    rate={settings.tts?.rate}
-                                                                                    volume={settings.tts?.volume}
-                                                                                    renderText={renderHoverableText}
-                                                                                />
-                                                                            )}
-                                                                            {!isLoading && (
-                                                                                <StatefulTooltip
-                                                                                    content={
-                                                                                        isCollectedWord
-                                                                                            ? t(
-                                                                                                  'Remove from collection'
-                                                                                              )
-                                                                                            : t('Add to collection')
-                                                                                    }
-                                                                                    showArrow
-                                                                                    placement='right'
                                                                                 >
-                                                                                    <div
-                                                                                        className={styles.actionButton}
-                                                                                        onClick={() =>
-                                                                                            onWordCollection(
-                                                                                                isCollectedWord
-                                                                                            )
-                                                                                        }
-                                                                                    >
-                                                                                        {isCollectedWord ? (
-                                                                                            <MdGrade size={15} />
-                                                                                        ) : (
-                                                                                            <MdOutlineGrade size={15} />
-                                                                                        )}
-                                                                                    </div>
-                                                                                </StatefulTooltip>
-                                                                            )}
-                                                                        </div>
-                                                                    ) : isLoading ? (
-                                                                        line
-                                                                    ) : (
-                                                                        <PhoneticText
-                                                                            text={line}
-                                                                            fallbackText={editableText}
-                                                                            highlightRange={lineHighlightRange}
-                                                                            lang={
-                                                                                isWordMode
-                                                                                    ? sourceLang
-                                                                                    : targetLang ?? 'en'
-                                                                            }
-                                                                            provider={settings.tts?.provider}
-                                                                            voice={
-                                                                                settings.tts?.voices?.find(
-                                                                                    (item) =>
-                                                                                        item.lang ===
-                                                                                        (isWordMode
-                                                                                            ? sourceLang
-                                                                                            : targetLang ?? 'en')
-                                                                                )?.voice
-                                                                            }
-                                                                            rate={settings.tts?.rate}
-                                                                            volume={settings.tts?.volume}
-                                                                            renderText={renderHoverableText}
-                                                                        />
-                                                                    )}
-                                                                    {isLoading && i === translatedLines.length - 1 && (
-                                                                        <span className={styles.caret} />
-                                                                    )}
-                                                                </div>
-                                                            )
-                                                        })
-                                                    )}
-                                                </div>
+                                                                                    {isCollectedWord ? (
+                                                                                        <MdGrade size={15} />
+                                                                                    ) : (
+                                                                                        <MdOutlineGrade size={15} />
+                                                                                    )}
+                                                                                </div>
+                                                                            </StatefulTooltip>
+                                                                        )}
+                                                                    </div>
+                                                                ) : isLoading ? (
+                                                                    line
+                                                                ) : (
+                                                                    <PhoneticText
+                                                                        text={line}
+                                                                        fallbackText={translateDeps.text}
+                                                                        highlightRange={lineHighlightRange}
+                                                                        lang={
+                                                                            isWordMode ? sourceLang : targetLang ?? 'en'
+                                                                        }
+                                                                        provider={settings.tts?.provider}
+                                                                        voice={
+                                                                            settings.tts?.voices?.find(
+                                                                                (item) =>
+                                                                                    item.lang ===
+                                                                                    (isWordMode
+                                                                                        ? sourceLang
+                                                                                        : targetLang ?? 'en')
+                                                                            )?.voice
+                                                                        }
+                                                                        rate={settings.tts?.rate}
+                                                                        volume={settings.tts?.volume}
+                                                                    />
+                                                                )}
+                                                                {isLoading && i === translatedLines.length - 1 && (
+                                                                    <span className={styles.caret} />
+                                                                )}
+                                                            </div>
+                                                        )
+                                                    })
+                                                )}
                                             </div>
-                                        </WordHoverProvider>
+                                        </div>
                                         {translatedText && (
                                             <div ref={actionButtonsRef} className={styles.actionButtonsContainer}>
                                                 <div style={{ marginRight: 'auto' }} />
-                                                {!isLoading && (
-                                                    <Tooltip content={t('Retry')} placement='bottom'>
-                                                        <div
-                                                            onClick={() => forceTranslate()}
-                                                            className={styles.actionButton}
-                                                        >
-                                                            <RxReload size={15} />
-                                                        </div>
-                                                    </Tooltip>
-                                                )}
                                                 <Tooltip content={t('Speak')} placement='bottom'>
                                                     <div className={styles.actionButton}>
                                                         <SpeakerIcon
@@ -3250,8 +2969,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                     const browser = (await import('webextension-polyfill')).default
                                     await browser.runtime.sendMessage({
                                         type: 'openOptionsPage',
-                                        openaiAPIKeyPromotionID: openaiAPIKeyPromotion?.id,
-                                        headerPromotionID: settingsHeaderPromotion?.id,
                                     })
                                 } else {
                                     setShowSettings((s: boolean) => !s)
@@ -3270,35 +2987,12 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                 {showSettings ? (
                                     <TiArrowBack size={15} />
                                 ) : (
-                                    <div
+                                    <IoSettingsOutline
                                         style={{
-                                            position: 'relative',
+                                            display: 'block',
                                         }}
-                                    >
-                                        <IoSettingsOutline
-                                            style={{
-                                                display: 'block',
-                                            }}
-                                            size={15}
-                                        />
-                                        {shouldShowPromotionNotification &&
-                                            (openaiAPIKeyPromotion || settingsHeaderPromotion) &&
-                                            (!openaiAPIKeyPromotionShowed || !settingsHeaderPromotionShowed) && (
-                                                <div
-                                                    style={{
-                                                        position: 'absolute',
-                                                        width: '0.45rem',
-                                                        height: '0.45rem',
-                                                        top: '-4px',
-                                                        right: '-6px',
-                                                        borderRadius: '50%',
-                                                        backgroundColor: settingsHeaderPromotionShowed
-                                                            ? theme.colors.warning400
-                                                            : theme.colors.accent300,
-                                                    }}
-                                                />
-                                            )}
-                                    </div>
+                                        size={15}
+                                    />
                                 )}
                                 {showSettings ? t('Go back') : ''}
                             </div>
@@ -3333,37 +3027,10 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                 })}
                                 {activateAction?.provider || settings.provider}
                             </div>
-                            {(activateAction?.apiModel || translateDeps.engineModel) &&
-                                ` ${activateAction?.apiModel || translateDeps.engineModel}`}
-                            {(activateAction?.provider || settings.provider) === 'Claude' &&
-                                (activateAction?.thinking ?? settings.claudeThinking) &&
-                                ' · Thinking Mode'}
                         </div>
                     )}
                     {!showSettings && (
                         <div className={styles.footerActions}>
-                            {availableUpdate && (
-                                <Tooltip
-                                    content={`${t('A new version is available!')} v${availableUpdate.version}`}
-                                    placement='top'
-                                >
-                                    <button
-                                        type='button'
-                                        className={styles.updateButton}
-                                        aria-label={`${t('Update')} v${availableUpdate.version}`}
-                                        onClick={async (event) => {
-                                            event.stopPropagation()
-                                            event.preventDefault()
-                                            const { commands } = await import('@/tauri/bindings')
-                                            await commands.showUpdaterWindow()
-                                        }}
-                                    >
-                                        <MdBrowserUpdated size={12} />
-                                        <span>{t('Update')}</span>
-                                        <span className={styles.updateVersion}>v{availableUpdate.version}</span>
-                                    </button>
-                                </Tooltip>
-                            )}
                             <Tooltip content={t('History')} placement='top'>
                                 <Button
                                     size='mini'
@@ -3419,17 +3086,20 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                     animate
                     role='dialog'
                 >
-                    <Vocabulary
-                        onCancel={() => setVocabularyType('hide')}
-                        onInsert={(content, highlightWords) => {
-                            setEditableText(content)
-                            setHighlightWords(highlightWords)
-                            setSelectedWord('')
-                            setActivateAction(actions?.find((action) => action.mode === 'translate'))
-                            setVocabularyType('hide')
-                        }}
-                        type={vocabularyType as 'vocabulary' | 'article'}
-                    />
+                    <Suspense fallback={null}>
+                        <Vocabulary
+                            onCancel={() => setVocabularyType('hide')}
+                            onTypeChange={setVocabularyType}
+                            onInsert={(content, highlightWords) => {
+                                setEditableText(content)
+                                setHighlightWords(highlightWords)
+                                setSelectedWord('')
+                                setActivateAction(actions?.find((action) => action.mode === 'translate'))
+                                setVocabularyType('hide')
+                            }}
+                            type={vocabularyType as 'vocabulary' | 'article'}
+                        />
+                    </Suspense>
                 </Modal>
             )}
             <Modal
@@ -3452,17 +3122,21 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                     />
                 </ModalHeader>
                 <ModalBody>
-                    <ActionManager draggable={props.showSettingsIcon} />
+                    <Suspense fallback={null}>
+                        <ActionManager draggable={props.showSettingsIcon} />
+                    </Suspense>
                 </ModalBody>
             </Modal>
             {isHistoryOpen ? (
-                <TranslationHistory
-                    isOpen
-                    actions={actions ?? []}
-                    activeActionId={activateAction?.id}
-                    onClose={() => setIsHistoryOpen(false)}
-                    onRestore={handleHistoryRestore}
-                />
+                <Suspense fallback={null}>
+                    <TranslationHistory
+                        isOpen
+                        actions={actions ?? []}
+                        activeActionId={activateAction?.id}
+                        onClose={() => setIsHistoryOpen(false)}
+                        onRestore={handleHistoryRestore}
+                    />
+                </Suspense>
             ) : null}
             <Toaster />
         </div>

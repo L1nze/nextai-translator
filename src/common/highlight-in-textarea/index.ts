@@ -20,6 +20,13 @@ export class HighlightInTextarea {
     private highlights: HTMLDivElement | null
     private backdrop: HTMLDivElement | null
     private browser: string | null
+    // Typography only changes when the app swaps fonts (settings or the
+    // explain-code monospace toggle); re-reading and re-writing 13 style
+    // properties on every keystroke forced a needless style recalc.
+    private lastTypographySignature: string | null = null
+    // The last rendered (value, marks) pair: identical input re-builds the
+    // entire mirror layer's innerHTML for nothing.
+    private lastRenderKey: string | null = null
 
     constructor(el: HTMLTextAreaElement, config: IConfig) {
         this.backdrop = null
@@ -156,8 +163,9 @@ export class HighlightInTextarea {
 
     public handleInput() {
         if (!this.hasActiveHighlight()) {
-            if (this.highlights) {
+            if (this.highlights && this.highlights.innerHTML !== '') {
                 this.highlights.innerHTML = ''
+                this.lastRenderKey = null
             }
             return
         }
@@ -336,6 +344,12 @@ export class HighlightInTextarea {
         if (!this.highlights) {
             return
         }
+        const renderKey =
+            boundaries.map((b: any) => `${b.type}:${b.index}:${b.className ?? ''}`).join(',') + '\u0000' + input
+        if (renderKey === this.lastRenderKey) {
+            return
+        }
+        this.lastRenderKey = renderKey
         this.highlights.innerText = input
         boundaries.forEach((boundary: any, index: any) => {
             let markup
@@ -407,6 +421,12 @@ export class HighlightInTextarea {
             return
         }
         const computed = window.getComputedStyle(this.el)
+        const signatureProperties = ['font-family', 'font-size', 'font-style', 'font-weight', 'line-height']
+        const signature = signatureProperties.map((p) => computed.getPropertyValue(p)).join('|')
+        if (signature === this.lastTypographySignature) {
+            return
+        }
+        this.lastTypographySignature = signature
         const properties = [
             'font-family',
             'font-size',

@@ -2,19 +2,16 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import _ from 'underscore'
 import { Tabs, Tab, StyledTabList, StyledTabPanel } from 'baseui-sd/tabs-motion'
 import icon from '../assets/images/icon-large.png'
-import beams from '../assets/images/beams.jpg'
-import wechat from '../assets/images/wechat.png'
-import alipay from '../assets/images/alipay.png'
 import toast from 'react-hot-toast'
 import * as utils from '../utils'
 import { Client as Styletron } from 'styletron-engine-atomic'
 import { Provider as StyletronProvider } from 'styletron-react'
-import { BaseProvider, LightTheme } from 'baseui-sd'
+import { BaseProvider } from 'baseui-sd'
 import { Input } from 'baseui-sd/input'
 import { createForm } from './Form'
 import { Button, ButtonProps } from 'baseui-sd/button'
 import { TranslateMode, APIModel } from '../translate'
-import { Select, Value, Option, SelectProps, Options } from 'baseui-sd/select'
+import { Select, Value, Option, Options } from 'baseui-sd/select'
 import { Combobox } from 'baseui-sd/combobox'
 import ChevronDown from 'baseui-sd/icon/chevron-down'
 import { SpinnerIcon } from './SpinnerIcon'
@@ -27,11 +24,10 @@ import { ISettings, IThemedStyleProps, LanguageDetectionEngine, ProxyProtocol, T
 import { useTheme } from '../hooks/useTheme'
 import { IoCloseCircle, IoRefreshSharp, IoSettingsOutline } from 'react-icons/io5'
 import { useTranslation } from 'react-i18next'
-import AppConfig from '../../../package.json'
 import { useSettings } from '../hooks/useSettings'
 import { defaultTTSProvider, langCode2TTSLang, ttsLangTestTextMap } from '../tts'
 import { RiDeleteBin5Line } from 'react-icons/ri'
-import { IoIosHelpCircleOutline, IoIosSave, IoMdAdd } from 'react-icons/io'
+import { IoIosSave, IoMdAdd } from 'react-icons/io'
 import { TTSProvider } from '../tts/types'
 import { fetchEdgeVoices } from '../tts/edge-tts'
 import { fetchLocalVoices } from '../tts/local-tts'
@@ -41,35 +37,22 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { actionService } from '../services/action'
 import { Action } from '../internal-services/db'
 import { GlobalSuspense } from './GlobalSuspense'
-import { Modal, ModalBody, ModalButton, ModalFooter, ModalHeader } from 'baseui-sd/modal'
-import { Provider, engineIcons, getEngine } from '../engines'
+import { FREE_MT_PROVIDERS, Provider, engineIcons, getEngine } from '../engines'
 import { IModel } from '../engines/interfaces'
 import { PiTextbox } from 'react-icons/pi'
 import { BsKeyboard } from 'react-icons/bs'
 import { TbCloudNetwork } from 'react-icons/tb'
 import { Cell, Grid } from 'baseui-sd/layout-grid'
-import {
-    II18nPromotionContent,
-    IPromotionResponse,
-    fetchPromotions,
-    II18nPromotionContentItem,
-    choicePromotionItem,
-    IPromotionItem,
-} from '../services/promotion'
 import useSWR from 'swr'
-import { Markdown } from './Markdown'
-import type { UnlistenFn } from '@tauri-apps/api/event'
-import { usePromotionShowed } from '../hooks/usePromotionShowed'
 import { Skeleton } from 'baseui-sd/skeleton'
 import { SpeakerIcon } from './SpeakerIcon'
 import Toaster from './Toaster'
 import { RxSpeakerLoud } from 'react-icons/rx'
-import { Notification } from 'baseui-sd/notification'
-import { usePromotionNeverDisplay } from '../hooks/usePromotionNeverDisplay'
 import { Textarea } from 'baseui-sd/textarea'
 import { ProxyTester } from './ProxyTester'
 import { CUSTOM_MODEL_ID } from '../constants'
 import { filterModelOptions } from './model-option-filter'
+import { WindowControls } from './WindowControls'
 import { isMacOS } from '../utils'
 import NumberInput from './NumberInput'
 import { DurationPicker } from './DurationPicker'
@@ -1185,45 +1168,6 @@ function UseCompactLookupCheckbox({ value, onChange, onBlur }: UseCompactLookupC
 }
 
 const useStyles = createUseStyles({
-    headerPromotion: (props: IThemedStyleProps) => {
-        return {
-            '& p': {
-                margin: '1px 0',
-            },
-            '& a': {
-                color: props.theme.colors.contentPrimary,
-                textDecoration: 'underline',
-            },
-        }
-    },
-    promotion: (props: IThemedStyleProps) => {
-        return {
-            'display': 'flex',
-            'flexDirection': 'column',
-            'gap': '4px',
-            'borderRadius': '12px',
-            'padding': '10px 14px',
-            'color': props.themeType === 'dark' ? props.theme.colors.black : props.theme.colors.contentPrimary,
-            'backgroundColor': props.theme.colors.warning100,
-            '& p': {
-                margin: '2px 0',
-            },
-            '& a': {
-                color: props.themeType === 'dark' ? props.theme.colors.black : props.theme.colors.contentPrimary,
-                textDecoration: 'underline',
-            },
-        }
-    },
-    disclaimer: (props: IThemedStyleProps) => {
-        return {
-            'color': props.theme.colors.contentPrimary,
-            'lineHeight': 1.8,
-            '& a': {
-                color: props.theme.colors.contentPrimary,
-                textDecoration: 'underline',
-            },
-        }
-    },
     footer: (props: IThemedStyleProps) =>
         props.isDesktopApp
             ? {
@@ -1393,14 +1337,7 @@ function HotkeyRecorder({ value, onChange, onBlur, testId }: IHotkeyRecorderProp
     )
 }
 
-interface IAddProviderIconsProps {
-    options: Options
-    currentProvider?: Provider
-    hasPromotion?: boolean
-    theme: typeof LightTheme
-}
-
-const addProviderIcons = ({ options, currentProvider, hasPromotion, theme }: IAddProviderIconsProps) => {
+const addProviderIcons = (options: Options) => {
     if (!Array.isArray(options)) {
         return options
     }
@@ -1412,7 +1349,7 @@ const addProviderIcons = ({ options, currentProvider, hasPromotion, theme }: IAd
         if (!icon) {
             return item
         }
-        let label = (
+        const label = (
             <div
                 style={{
                     display: 'flex',
@@ -1425,30 +1362,6 @@ const addProviderIcons = ({ options, currentProvider, hasPromotion, theme }: IAd
                 {item.label}
             </div>
         )
-        if (item.id === 'OpenAI') {
-            label = (
-                <div
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 10,
-                    }}
-                >
-                    {label}
-                    {hasPromotion && currentProvider !== 'OpenAI' && (
-                        <div
-                            style={{
-                                width: '0.45rem',
-                                height: '0.45rem',
-                                borderRadius: '50%',
-                                backgroundColor: theme.colors.warning300,
-                            }}
-                        />
-                    )}
-                </div>
-            )
-        }
         return {
             ...item,
             label,
@@ -1459,23 +1372,13 @@ const addProviderIcons = ({ options, currentProvider, hasPromotion, theme }: IAd
 interface IProviderSelectorProps {
     value?: Provider
     onChange?: (value: Provider) => void
-    hasPromotion?: boolean
+    // Hides the free machine-translation services; used by selectors for
+    // LLM-only features (polishing / summarizing).
+    excludeFreeMT?: boolean
 }
 
-export function ProviderSelector({ value, onChange, hasPromotion }: IProviderSelectorProps) {
-    const { theme } = useTheme()
+export function ProviderSelector({ value, onChange, excludeFreeMT }: IProviderSelectorProps) {
     const { t } = useTranslation()
-
-    let overrides: SelectProps['overrides'] = undefined
-    if (hasPromotion && value !== 'OpenAI') {
-        overrides = {
-            ControlContainer: {
-                style: {
-                    borderColor: theme.colors.warning300,
-                },
-            },
-        }
-    }
 
     const options = utils.isDesktopApp()
         ? ([
@@ -1496,6 +1399,17 @@ export function ProviderSelector({ value, onChange, hasPromotion }: IProviderSel
               { label: 'Groq', id: 'Groq' },
               { label: 'DeepSeek', id: 'DeepSeek' },
               { label: 'Cerebras', id: 'Cerebras' },
+              { label: 'SiliconFlow', id: 'SiliconFlow' },
+              { label: `DashScope (Qwen)`, id: 'DashScope' },
+              { label: `Zhipu (GLM)`, id: 'Zhipu' },
+              { label: 'MiMo (Xiaomi)', id: 'MiMo' },
+              { label: 'OpenCode (Go)', id: 'OpenCode' },
+              { label: `Google Translate (${t('Free')})`, id: 'GoogleTranslate' },
+              { label: `Tencent Transmart (${t('Free')})`, id: 'Transmart' },
+              { label: `Volcengine Translate (${t('Free')})`, id: 'Volcengine' },
+              { label: `CNKI Translate (${t('Free')})`, id: 'CNKI' },
+              { label: `MyMemory (${t('Free')})`, id: 'MyMemory' },
+              { label: `${t('Custom')} (OpenAI Compatible)`, id: 'Custom' },
           ] as {
               label: string
               id: Provider
@@ -1517,14 +1431,26 @@ export function ProviderSelector({ value, onChange, hasPromotion }: IProviderSel
               { label: 'Groq', id: 'Groq' },
               { label: 'DeepSeek', id: 'DeepSeek' },
               { label: 'Cerebras', id: 'Cerebras' },
+              { label: 'SiliconFlow', id: 'SiliconFlow' },
+              { label: `DashScope (Qwen)`, id: 'DashScope' },
+              { label: `Zhipu (GLM)`, id: 'Zhipu' },
+              { label: 'MiMo (Xiaomi)', id: 'MiMo' },
+              { label: 'OpenCode (Go)', id: 'OpenCode' },
+              { label: `Google Translate (${t('Free')})`, id: 'GoogleTranslate' },
+              { label: `Tencent Transmart (${t('Free')})`, id: 'Transmart' },
+              { label: `Volcengine Translate (${t('Free')})`, id: 'Volcengine' },
+              { label: `CNKI Translate (${t('Free')})`, id: 'CNKI' },
+              { label: `MyMemory (${t('Free')})`, id: 'MyMemory' },
+              { label: `${t('Custom')} (OpenAI Compatible)`, id: 'Custom' },
           ] as {
               label: string
               id: Provider
           }[])
 
+    const visibleOptions = excludeFreeMT ? options.filter((option) => !FREE_MT_PROVIDERS.has(option.id)) : options
+
     return (
         <Select
-            overrides={overrides}
             size='compact'
             searchable={false}
             clearable={false}
@@ -1538,12 +1464,7 @@ export function ProviderSelector({ value, onChange, hasPromotion }: IProviderSel
             onChange={(params) => {
                 onChange?.(params.value[0].id as Provider | 'OpenAI')
             }}
-            options={addProviderIcons({
-                options,
-                currentProvider: value,
-                hasPromotion,
-                theme,
-            })}
+            options={addProviderIcons(visibleOptions)}
         />
     )
 }
@@ -1553,8 +1474,6 @@ const { Form, FormItem, useForm } = createForm<ISettings>()
 interface IInnerSettingsProps {
     showFooter?: boolean
     onSave?: (oldSettings: ISettings) => void
-    headerPromotionID?: string
-    openaiAPIKeyPromotionID?: string
 }
 
 interface ISettingsProps extends IInnerSettingsProps {
@@ -1576,6 +1495,232 @@ export function Settings({ engine, ...props }: ISettingsProps) {
 
 interface IPerActionModelConfigProps {
     settings: ISettings
+}
+
+// Credential / base-URL settings fields per provider, so the polishing &
+// summarize card can configure a provider that differs from the global one.
+// The field names bind to the same per-provider settings used by the global
+// provider section, so a key entered here is the key used everywhere for
+// that provider.
+const PROVIDER_CREDENTIAL_FIELDS: Partial<
+    Record<Provider, { keyField?: keyof ISettings; urlField?: keyof ISettings; pathField?: keyof ISettings }>
+> = {
+    OpenAI: { keyField: 'apiKeys' },
+    Azure: { keyField: 'azureAPIKeys' },
+    Claude: { keyField: 'claudeAPIKey', urlField: 'claudeAPIURL' },
+    Gemini: { keyField: 'geminiAPIKey' },
+    Ollama: { urlField: 'ollamaAPIURL' },
+    Groq: { keyField: 'groqAPIKey' },
+    DeepSeek: { keyField: 'deepSeekAPIKey' },
+    Cerebras: { keyField: 'cerebrasAPIKey' },
+    Moonshot: { keyField: 'moonshotAPIKey' },
+    MiniMax: { keyField: 'miniMaxAPIKey' },
+    Cohere: { keyField: 'cohereAPIKey' },
+    Kimi: { keyField: 'kimiAccessToken' },
+    ChatGLM: { keyField: 'chatglmAccessToken' },
+    TeamoRouter: { keyField: 'teamoRouterAPIKey' },
+    OpenRouter: { keyField: 'openRouterAPIKey' },
+    LiteLLM: { keyField: 'liteLLMAPIKey', urlField: 'liteLLMAPIURL' },
+    SiliconFlow: { keyField: 'siliconFlowAPIKey' },
+    DashScope: { keyField: 'dashScopeAPIKey' },
+    Zhipu: { keyField: 'zhipuAPIKey', urlField: 'zhipuAPIURL' },
+    MiMo: { keyField: 'mimoAPIKey' },
+    OpenCode: { keyField: 'openCodeAPIKey' },
+    Custom: { keyField: 'customAPIKey', urlField: 'customAPIURL', pathField: 'customAPIURLPath' },
+}
+
+function PolishingSummarizeProviderCard({ values, onBlur }: { values: ISettings; onBlur: () => void }) {
+    const { t } = useTranslation()
+    const { theme } = useTheme()
+    const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
+    const [testMessage, setTestMessage] = useState('')
+
+    const provider = values.polishingSummarizeProvider
+    const fields = provider ? PROVIDER_CREDENTIAL_FIELDS[provider] : undefined
+    const isSameAsGlobal = provider === values.provider
+    const apiKey = provider ? utils.getAPIKeyForProvider(provider, values) : undefined
+
+    const handleTestModel = useCallback(async () => {
+        if (!provider) {
+            return
+        }
+        setTestStatus('testing')
+        setTestMessage('')
+        try {
+            // Engines read credentials from persisted settings; save the
+            // form first so the test runs against what is on screen.
+            await utils.setSettings(values)
+            const engine = getEngine(provider)
+            let text = ''
+            let error: string | undefined
+            let settled = false
+            const finished = new Promise<void>((resolve) => {
+                void engine
+                    .sendMessage({
+                        rolePrompt: '',
+                        commandPrompt: 'Reply with exactly: OK',
+                        modelOverride: values.polishingSummarizeAPIModel || undefined,
+                        onMessage: async (message) => {
+                            text += message.content
+                        },
+                        onError: (err) => {
+                            error = err
+                        },
+                        onFinished: () => {
+                            settled = true
+                            resolve()
+                        },
+                        signal: new AbortController().signal,
+                    })
+                    .catch((e) => {
+                        error = e instanceof Error ? e.message : String(e)
+                        settled = true
+                        resolve()
+                    })
+            })
+            const timeout = new Promise<'timeout'>((resolve) => {
+                setTimeout(() => resolve('timeout'), 30000)
+            })
+            const outcome = await Promise.race([finished.then(() => 'done' as const), timeout])
+            if (outcome === 'timeout' && !settled) {
+                setTestStatus('error')
+                setTestMessage(t('Request timed out after 30 seconds.'))
+                return
+            }
+            if (error) {
+                setTestStatus('error')
+                setTestMessage(error)
+                return
+            }
+            if (!text.trim()) {
+                setTestStatus('error')
+                setTestMessage(t('The model returned no content.'))
+                return
+            }
+            setTestStatus('ok')
+            setTestMessage(`${t('Model is available')}: ${text.trim().slice(0, 60)}`)
+        } catch (e) {
+            setTestStatus('error')
+            setTestMessage(e instanceof Error ? e.message : String(e))
+        }
+    }, [provider, t, values])
+
+    return (
+        <div
+            style={{
+                border: `1px solid ${theme.colors.borderOpaque}`,
+                borderRadius: '10px',
+                padding: '16px',
+                marginBottom: '16px',
+                backgroundColor: theme.colors.backgroundSecondary,
+            }}
+        >
+            <div
+                style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    marginBottom: '12px',
+                    color: theme.colors.contentPrimary,
+                }}
+            >
+                {t('Polishing & Summarize Providers')}
+            </div>
+            <div
+                style={{
+                    fontSize: '12px',
+                    marginBottom: '12px',
+                    color: theme.colors.contentSecondary,
+                }}
+            >
+                {t(
+                    'Keep polishing and summarizing on their own LLM providers, independent of the translation provider above.'
+                )}
+            </div>
+            <FormItem
+                name='polishingSummarizeUseSeparateProvider'
+                label={t('Use a separate provider for polishing & summarizing')}
+            >
+                <MyCheckbox onBlur={onBlur} />
+            </FormItem>
+            <div
+                style={{
+                    display: values.polishingSummarizeUseSeparateProvider ? 'block' : 'none',
+                }}
+            >
+                <FormItem
+                    name='polishingSummarizeProvider'
+                    label={t('Polishing & Summarize Provider')}
+                    required={values.polishingSummarizeUseSeparateProvider}
+                >
+                    <ProviderSelector excludeFreeMT />
+                </FormItem>
+                {provider && isSameAsGlobal && (
+                    <div
+                        style={{
+                            fontSize: '12px',
+                            marginBottom: '12px',
+                            color: theme.colors.contentSecondary,
+                        }}
+                    >
+                        {t('Credentials for this provider are configured in the section above.')}
+                    </div>
+                )}
+                {provider && !isSameAsGlobal && fields && (
+                    <>
+                        {fields.urlField && (
+                            <FormItem name={fields.urlField} label={t('API URL')}>
+                                <Input size='compact' onBlur={onBlur} />
+                            </FormItem>
+                        )}
+                        {fields.pathField && (
+                            <FormItem name={fields.pathField} label={t('API URL Path')}>
+                                <Input size='compact' onBlur={onBlur} />
+                            </FormItem>
+                        )}
+                        {fields.keyField && (
+                            <FormItem name={fields.keyField} label={t('API Key')}>
+                                <Input type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                        )}
+                    </>
+                )}
+                <FormItem
+                    name='polishingSummarizeAPIModel'
+                    label={t('API Model')}
+                    caption={t('Leave blank to use the default model of the selected provider.')}
+                >
+                    <APIModelSelector
+                        provider={provider ?? values.provider}
+                        currentProvider={provider ?? values.provider}
+                        apiKey={apiKey}
+                        onBlur={onBlur}
+                    />
+                </FormItem>
+                <div
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                    }}
+                >
+                    <Button
+                        size='compact'
+                        kind='secondary'
+                        isLoading={testStatus === 'testing'}
+                        onClick={handleTestModel}
+                    >
+                        {t('Test Model')}
+                    </Button>
+                    {testStatus === 'ok' && (
+                        <span style={{ fontSize: '13px', color: theme.colors.positive }}>{testMessage}</span>
+                    )}
+                    {testStatus === 'error' && (
+                        <span style={{ fontSize: '13px', color: theme.colors.negative }}>{testMessage}</span>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
 }
 
 // Persist selected action across Settings open/close cycles
@@ -1660,9 +1805,10 @@ function PerActionModelConfig({ settings }: IPerActionModelConfigProps) {
         <div
             style={{
                 border: `1px solid ${theme.colors.borderOpaque}`,
-                borderRadius: '8px',
+                borderRadius: '10px',
                 padding: '16px',
                 marginBottom: '16px',
+                backgroundColor: theme.colors.backgroundSecondary,
             }}
         >
             <div
@@ -1853,50 +1999,15 @@ function PerActionModelConfig({ settings }: IPerActionModelConfigProps) {
     )
 }
 
-export function InnerSettings({
-    onSave,
-    showFooter = false,
-    openaiAPIKeyPromotionID,
-    headerPromotionID,
-}: IInnerSettingsProps) {
-    const { data: promotions, mutate: refetchPromotions } = useSWR<IPromotionResponse>('promotions', fetchPromotions)
-
-    useEffect(() => {
-        const timer = setInterval(
-            () => {
-                refetchPromotions()
-            },
-            1000 * 60 * 10
-        )
-        return () => {
-            clearInterval(timer)
-        }
-    }, [refetchPromotions])
-
+export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProps) {
     const isTauri = utils.isTauri()
-    const registerFocusListener = useCallback(
-        async (handler: () => void): Promise<UnlistenFn | undefined> => {
-            if (!isTauri) {
-                return undefined
-            }
-            try {
-                const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
-                const appWindow = WebviewWindow.getCurrent()
-                return await appWindow.listen('tauri://focus', handler)
-            } catch (error) {
-                console.error('Failed to register Tauri focus listener', error)
-                return undefined
-            }
-        },
-        [isTauri]
-    )
     const trackTauriEvent = useCallback(
         async (eventName: string, payload?: Record<string, string | number>) => {
             if (!isTauri) {
                 return
             }
             try {
-                const { trackEvent } = await import('@aptabase/tauri')
+                const { trackEvent } = await import('../track')
                 await trackEvent(eventName, payload)
             } catch (error) {
                 console.error(`Failed to track event ${eventName}`, error)
@@ -1904,35 +2015,6 @@ export function InnerSettings({
         },
         [isTauri]
     )
-
-    useEffect(() => {
-        if (!isTauri) {
-            return undefined
-        }
-        let disposed = false
-        let unlisten: UnlistenFn | undefined
-
-        registerFocusListener(() => {
-            refetchPromotions()
-        })
-            .then((cb) => {
-                if (!cb) {
-                    return
-                }
-                if (disposed) {
-                    cb()
-                    return
-                }
-                unlisten = cb
-            })
-            .catch((error) => {
-                console.error('Failed to set promotions focus listener', error)
-            })
-        return () => {
-            disposed = true
-            unlisten?.()
-        }
-    }, [isTauri, refetchPromotions, registerFocusListener])
 
     useEffect(() => {
         void trackTauriEvent('screen_view', { name: 'Settings' })
@@ -2104,8 +2186,6 @@ export function InnerSettings({
         }
     }, [showFooter])
 
-    const [showBuyMeACoffee, setShowBuyMeACoffee] = useState(false)
-
     const [activeTab, setActiveTab] = useState('general')
 
     const [isScrolled, setIsScrolled] = useState(window.scrollY > 0)
@@ -2123,22 +2203,27 @@ export function InnerSettings({
     const tabsOverrides = {
         Root: {
             style: {
-                '& button:hover': {
-                    background: 'transparent !important',
-                },
+                width: '100%',
+                minWidth: 0,
             },
         },
         TabList: {
             style: () => ({}),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             component: function TabsListOverride(props: any) {
-                return (
-                    <Grid behavior='fluid'>
-                        <Cell span={12}>
-                            <StyledTabList {...props} />
-                        </Cell>
-                    </Grid>
-                )
+                return <StyledTabList {...props} />
+            },
+        },
+        // The sliding underline and full-width border fight with the pill
+        // style below; the nav's own border separates header from content.
+        TabHighlight: {
+            style: {
+                display: 'none',
+            },
+        },
+        TabBorder: {
+            style: {
+                display: 'none',
             },
         },
     }
@@ -2160,179 +2245,38 @@ export function InnerSettings({
             },
         },
         Tab: {
-            style: {
-                'color': theme.colors.black,
-                'background': 'transparent',
+            style: ({ $active }: { $active?: boolean }) => ({
+                'color': $active
+                    ? '#ffffff'
+                    : themeType === 'dark'
+                    ? 'rgba(203, 213, 225, 0.92)'
+                    : 'rgba(51, 65, 85, 0.85)',
+                'background': $active ? (themeType === 'dark' ? '#3b82f6' : '#2563eb') : 'transparent',
+                'borderRadius': '8px',
+                'fontWeight': $active ? 600 : 400,
+                'height': '38px',
+                'padding': '0 16px',
+                'boxSizing': 'border-box',
+                'transition': 'background 0.15s ease, color 0.15s ease',
                 ':hover': {
-                    background: 'rgba(255, 255, 255, 0.35) !important',
+                    background: $active
+                        ? themeType === 'dark'
+                            ? '#3b82f6'
+                            : '#2563eb'
+                        : themeType === 'dark'
+                        ? 'rgba(255, 255, 255, 0.08)'
+                        : 'rgba(15, 23, 42, 0.06)',
                 },
-                ':active': {
-                    background: 'rgba(255, 255, 255, 0.45) !important',
-                },
-            },
+            }),
         },
     }
-
-    const getI18nPromotionContent = (contentItem: II18nPromotionContentItem) => {
-        let c =
-            contentItem.content[
-                (values.i18n as keyof II18nPromotionContent | undefined) ?? contentItem.fallback_language
-            ]
-        if (!c) {
-            c = contentItem.content[contentItem.fallback_language]
-        }
-        return c
-    }
-
-    const renderI18nPromotionContent = (contentItem: II18nPromotionContentItem) => {
-        if (contentItem.format === 'text') {
-            return <span>{getI18nPromotionContent(contentItem)}</span>
-        }
-
-        if (contentItem.format === 'html') {
-            return (
-                <div
-                    dangerouslySetInnerHTML={{
-                        __html: getI18nPromotionContent(contentItem) ?? '',
-                    }}
-                />
-            )
-        }
-
-        if (contentItem.format === 'markdown') {
-            return <Markdown linkTarget='_blank'>{getI18nPromotionContent(contentItem) ?? ''}</Markdown>
-        }
-
-        return <div />
-    }
-
-    const [disclaimerAgreeLink, setDisclaimerAgreeLink] = useState<string>()
-    const [disclaimerPromotion, setDisclaimerPromotion] = useState<IPromotionItem>()
-
-    const [openaiAPIKeyPromotion, setOpenaiAPIKeyPromotion] = useState<IPromotionItem>()
-
-    useEffect(() => {
-        let disposed = false
-        let unlisten: UnlistenFn | undefined
-        if (openaiAPIKeyPromotionID) {
-            setOpenaiAPIKeyPromotion(promotions?.openai_api_key?.find((item) => item.id === openaiAPIKeyPromotionID))
-        } else {
-            choicePromotionItem(promotions?.openai_api_key).then((item) => {
-                if (!disposed) {
-                    setOpenaiAPIKeyPromotion(item)
-                }
-            })
-            if (isTauri) {
-                registerFocusListener(() => {
-                    choicePromotionItem(promotions?.openai_api_key).then((item) => {
-                        if (!disposed) {
-                            setOpenaiAPIKeyPromotion(item)
-                        }
-                    })
-                })
-                    .then((cb) => {
-                        if (!cb) {
-                            return
-                        }
-                        if (disposed) {
-                            cb()
-                            return
-                        }
-                        unlisten = cb
-                    })
-                    .catch((error) => {
-                        console.error('Failed to set OpenAI promotion focus listener', error)
-                    })
-            }
-        }
-        return () => {
-            disposed = true
-            unlisten?.()
-        }
-    }, [isTauri, openaiAPIKeyPromotionID, promotions?.openai_api_key, registerFocusListener])
-
-    const [headerPromotion, setHeaderPromotion] = useState<IPromotionItem>()
-
-    useEffect(() => {
-        let disposed = false
-        let unlisten: UnlistenFn | undefined
-        if (headerPromotionID) {
-            setHeaderPromotion(promotions?.settings_header?.find((item) => item.id === headerPromotionID))
-        } else {
-            choicePromotionItem(promotions?.settings_header).then((item) => {
-                if (!disposed) {
-                    setHeaderPromotion(item)
-                }
-            })
-            if (isTauri) {
-                registerFocusListener(() => {
-                    choicePromotionItem(promotions?.settings_header).then((item) => {
-                        if (!disposed) {
-                            setHeaderPromotion(item)
-                        }
-                    })
-                })
-                    .then((cb) => {
-                        if (!cb) {
-                            return
-                        }
-                        if (disposed) {
-                            cb()
-                            return
-                        }
-                        unlisten = cb
-                    })
-                    .catch((error) => {
-                        console.error('Failed to set header promotion focus listener', error)
-                    })
-            }
-        }
-        return () => {
-            disposed = true
-            unlisten?.()
-        }
-    }, [headerPromotionID, isTauri, promotions?.settings_header, registerFocusListener])
-
-    const { promotionShowed: openaiAPIKeyPromotionShowed, setPromotionShowed: setOpenaiAPIKeyPromotionShowed } =
-        usePromotionShowed(openaiAPIKeyPromotion)
-
-    const { setPromotionShowed: setHeaderPromotionShowed } = usePromotionShowed(headerPromotion)
-
-    useEffect(() => {
-        setHeaderPromotionShowed(true)
-    }, [setHeaderPromotionShowed])
-
-    const {
-        promotionNeverDisplay: headerPromotionNeverDisplay,
-        setPromotionNeverDisplay: setHeaderPromotionNeverDisplay,
-    } = usePromotionNeverDisplay(headerPromotion)
-
-    const isOpenAI = values.provider === 'OpenAI'
-
-    useEffect(() => {
-        if (isOpenAI) {
-            setOpenaiAPIKeyPromotionShowed(true)
-        }
-    }, [setOpenaiAPIKeyPromotionShowed, isOpenAI])
-
-    useEffect(() => {
-        if (isOpenAI && openaiAPIKeyPromotion) {
-            void trackTauriEvent('promotion_view', { id: openaiAPIKeyPromotion.id })
-        }
-    }, [isOpenAI, openaiAPIKeyPromotion, trackTauriEvent])
-
-    useEffect(() => {
-        if (disclaimerPromotion?.id) {
-            void trackTauriEvent('promotion_disclaimer_view', { id: disclaimerPromotion.id })
-        }
-    }, [disclaimerPromotion?.id, trackTauriEvent])
 
     console.debug('render settings')
 
     return (
         <div
             style={{
-                paddingTop: utils.isBrowserExtensionOptions() ? undefined : '136px',
+                paddingTop: utils.isBrowserExtensionOptions() ? undefined : '76px',
                 paddingBottom: utils.isBrowserExtensionOptions() ? undefined : '32px',
                 background: isDesktopApp ? 'transparent' : theme.colors.backgroundPrimary,
                 minWidth: isDesktopApp ? 450 : 400,
@@ -2350,190 +2294,91 @@ export function InnerSettings({
                     width: '100%',
                     display: 'flex',
                     flexDirection: 'column',
-                    background: `url(${utils.getAssetUrl(beams)}) no-repeat center center`,
+                    // Neutral surface so the app logo and the blue active
+                    // tab carry the color; the old blue-tinted gradient
+                    // drowned both out on dark mode.
+                    background: themeType === 'dark' ? 'rgba(15, 23, 42, 0.97)' : '#f8fafc',
+                    borderBottom: `1px solid ${theme.colors.borderOpaque}`,
                     boxSizing: 'border-box',
                     boxShadow: isScrolled ? theme.lighting.shadow600 : undefined,
                 }}
                 data-tauri-drag-region
             >
+                <WindowControls />
                 <div
                     style={{
                         display: 'flex',
                         flexDirection: 'row',
                         alignItems: 'center',
-                        color: '#333',
-                        gap: 10,
-                        padding: '15px 25px 0 25px',
+                        gap: 12,
+                        // The standalone settings window reserves room for
+                        // the window controls overlaying the top-right
+                        // corner.
+                        padding: showFooter ? '10px 134px 10px 20px' : '10px 20px',
                     }}
                 >
-                    <img width='22' src={utils.getAssetUrl(icon)} alt='logo' />
-                    <h2
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 6,
+                    <img width='26' height='26' src={utils.getAssetUrl(icon)} alt='logo' style={{ flexShrink: 0 }} />
+                    <Tabs
+                        overrides={tabsOverrides}
+                        activeKey={activeTab}
+                        onChange={({ activeKey }) => {
+                            setActiveTab(activeKey as string)
                         }}
+                        renderAll
                     >
-                        NextAI Translator
-                        {AppConfig?.version ? (
-                            <a
-                                href='https://github.com/nextai-translator/nextai-translator/releases'
-                                target='_blank'
-                                rel='noreferrer'
-                                style={linkStyle}
-                            >
-                                {AppConfig.version}
-                            </a>
-                        ) : null}
-                    </h2>
-                    <div
-                        style={{
-                            flexGrow: 1,
-                        }}
-                    />
-                    <div>
-                        <Button
-                            kind='secondary'
-                            size='mini'
-                            onClick={(e) => {
-                                e.stopPropagation()
-                                setShowBuyMeACoffee(true)
-                                void trackTauriEvent('buy_me_a_coffee_clicked')
-                            }}
-                        >
-                            {'❤️  ' + t('Buy me a coffee')}
-                        </Button>
-                    </div>
-                </div>
-                <Tabs
-                    overrides={tabsOverrides}
-                    activeKey={activeTab}
-                    onChange={({ activeKey }) => {
-                        setActiveTab(activeKey as string)
-                    }}
-                    fill='fixed'
-                    renderAll
-                >
-                    <Tab
-                        title={t('General')}
-                        key='general'
-                        artwork={() => {
-                            return <IoSettingsOutline size={14} />
-                        }}
-                        overrides={tabOverrides}
-                    />
-                    {isTauri && (
                         <Tab
-                            title={t('Proxy')}
-                            key='proxy'
+                            title={t('General')}
+                            key='general'
                             artwork={() => {
-                                return <TbCloudNetwork size={14} />
+                                return <IoSettingsOutline size={14} />
                             }}
                             overrides={tabOverrides}
                         />
-                    )}
-                    <Tab
-                        title={t('TTS')}
-                        key='tts'
-                        artwork={() => {
-                            return <RxSpeakerLoud size={14} />
-                        }}
-                        overrides={tabOverrides}
-                    />
-                    <Tab
-                        title={t('Writing')}
-                        key='writing'
-                        artwork={() => {
-                            return <PiTextbox size={14} />
-                        }}
-                        overrides={tabOverrides}
-                    />
-                    <Tab
-                        title={t('Shortcuts')}
-                        key='shortcuts'
-                        artwork={() => {
-                            return <BsKeyboard size={14} />
-                        }}
-                        overrides={{
-                            ...tabOverrides,
-                            Tab: {
-                                ...tabOverrides.Tab,
-                                props: {
-                                    'data-testid': 'shortcuts',
+                        {isTauri && (
+                            <Tab
+                                title={t('Proxy')}
+                                key='proxy'
+                                artwork={() => {
+                                    return <TbCloudNetwork size={14} />
+                                }}
+                                overrides={tabOverrides}
+                            />
+                        )}
+                        <Tab
+                            title={t('TTS')}
+                            key='tts'
+                            artwork={() => {
+                                return <RxSpeakerLoud size={14} />
+                            }}
+                            overrides={tabOverrides}
+                        />
+                        <Tab
+                            title={t('Writing')}
+                            key='writing'
+                            artwork={() => {
+                                return <PiTextbox size={14} />
+                            }}
+                            overrides={tabOverrides}
+                        />
+                        <Tab
+                            title={t('Shortcuts')}
+                            key='shortcuts'
+                            artwork={() => {
+                                return <BsKeyboard size={14} />
+                            }}
+                            overrides={{
+                                ...tabOverrides,
+                                Tab: {
+                                    ...tabOverrides.Tab,
+                                    props: {
+                                        'data-testid': 'shortcuts',
+                                    },
                                 },
-                            },
-                        }}
-                    />
-                </Tabs>
+                            }}
+                        />
+                    </Tabs>
+                </div>
             </nav>
-            {headerPromotion && !headerPromotionNeverDisplay && (
-                <div
-                    className={styles.headerPromotion}
-                    onClick={(e) => {
-                        if ((e.target as HTMLElement).tagName === 'A') {
-                            const href = (e.target as HTMLAnchorElement).href
-                            if (href && href.startsWith('http')) {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                setDisclaimerPromotion(headerPromotion)
-                                setDisclaimerAgreeLink(href)
-                            }
-                        }
-                    }}
-                >
-                    <Notification
-                        overrides={{
-                            Body: {
-                                style: {
-                                    width: 'auto',
-                                    fontSize: '12px',
-                                    lineHeight: '1.6',
-                                    marginTop: '10px',
-                                    marginBottom: '0px',
-                                    paddingLeft: '14px',
-                                    paddingRight: '8px',
-                                    paddingTop: '6px',
-                                    paddingBottom: '6px',
-                                    color: theme.colors.contentPrimary,
-                                },
-                            },
-                        }}
-                        closeable={headerPromotion.can_never_display}
-                        onClose={() => {
-                            setHeaderPromotionNeverDisplay(true)
-                        }}
-                    >
-                        {renderI18nPromotionContent(headerPromotion.promotion)}
-                    </Notification>
-                </div>
-            )}
-            {!isDesktopApp && (
-                <div
-                    style={{
-                        padding: '20px 25px 0px 25px',
-                        color: theme.colors.contentPrimary,
-                    }}
-                >
-                    {t(
-                        'It is recommended to download the desktop application of NextAI Translator to enjoy the wonderful experience of word translation in all software!'
-                    )}{' '}
-                    <a
-                        target='_blank'
-                        href={
-                            values?.i18n?.toLowerCase().includes('zh')
-                                ? 'https://github.com/nextai-translator/nextai-translator/blob/main/README-CN.md#%E5%AE%89%E8%A3%85'
-                                : 'https://github.com/nextai-translator/nextai-translator#installation'
-                        }
-                        rel='noreferrer'
-                        style={{
-                            color: theme.colors.linkText,
-                        }}
-                    >
-                        {t('Download Link')}
-                    </a>
-                </div>
-            )}
             <Form
                 autoComplete='off'
                 autoCapitalize='off'
@@ -2557,28 +2402,7 @@ export function InnerSettings({
                         </FormItem>
                         <FormItem
                             name='provider'
-                            label={
-                                <div
-                                    style={{
-                                        display: 'flex',
-                                        flexDirection: 'row',
-                                        alignItems: 'center',
-                                        gap: 10,
-                                    }}
-                                >
-                                    {t('Default service provider')}
-                                    {openaiAPIKeyPromotion !== undefined && !openaiAPIKeyPromotionShowed && (
-                                        <div
-                                            style={{
-                                                width: '0.45rem',
-                                                height: '0.45rem',
-                                                borderRadius: '50%',
-                                                backgroundColor: theme.colors.warning300,
-                                            }}
-                                        />
-                                    )}
-                                </div>
-                            }
+                            label={t('Default service provider')}
                             required
                             caption={
                                 values.provider === 'Ollama' ? (
@@ -2597,9 +2421,7 @@ export function InnerSettings({
                                 ) : undefined
                             }
                         >
-                            <ProviderSelector
-                                hasPromotion={openaiAPIKeyPromotion !== undefined && !openaiAPIKeyPromotionShowed}
-                            />
+                            <ProviderSelector />
                         </FormItem>
                         <div
                             style={{
@@ -3066,54 +2888,10 @@ export function InnerSettings({
                                                 'to get your API Key. You can separate multiple API Keys with English commas to achieve quota doubling and load balancing.'
                                             )}
                                         </div>
-                                        {openaiAPIKeyPromotion && (
-                                            <div className={styles.promotion}>
-                                                <div
-                                                    onClick={(e) => {
-                                                        if ((e.target as HTMLElement).tagName === 'A') {
-                                                            const href = (e.target as HTMLAnchorElement).href
-                                                            if (href && href.startsWith('http')) {
-                                                                e.preventDefault()
-                                                                e.stopPropagation()
-                                                                setDisclaimerPromotion(openaiAPIKeyPromotion)
-                                                                setDisclaimerAgreeLink(href)
-                                                            }
-                                                        }
-                                                    }}
-                                                >
-                                                    {renderI18nPromotionContent(openaiAPIKeyPromotion.promotion)}
-                                                </div>
-                                                {openaiAPIKeyPromotion.configuration_doc_link && (
-                                                    <div
-                                                        style={{
-                                                            display: 'flex',
-                                                            flexDirection: 'row',
-                                                            alignItems: 'center',
-                                                            gap: 3,
-                                                        }}
-                                                    >
-                                                        <IoIosHelpCircleOutline size={12} />
-                                                        <a
-                                                            href={openaiAPIKeyPromotion.configuration_doc_link}
-                                                            target='_blank'
-                                                            rel='noreferrer'
-                                                        >
-                                                            {t('How to Use')}
-                                                        </a>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
                                     </div>
                                 }
                             >
-                                <Input
-                                    autoFocus={!openaiAPIKeyPromotion}
-                                    type='password'
-                                    size='compact'
-                                    name='apiKey'
-                                    onBlur={onBlur}
-                                />
+                                <Input autoFocus type='password' size='compact' name='apiKey' onBlur={onBlur} />
                             </FormItem>
                             <FormItem
                                 name='noModelsAPISupport'
@@ -3456,6 +3234,259 @@ export function InnerSettings({
                                 />
                             </FormItem>
                         </div>
+                        <div
+                            style={{
+                                display: values.provider === 'SiliconFlow' ? 'block' : 'none',
+                            }}
+                        >
+                            <FormItem
+                                required={values.provider === 'SiliconFlow'}
+                                name='siliconFlowAPIKey'
+                                label='SiliconFlow API Key'
+                                caption={
+                                    <div>
+                                        {t('Go to the')}{' '}
+                                        <a
+                                            target='_blank'
+                                            href='https://cloud.siliconflow.cn/account/ak'
+                                            rel='noreferrer'
+                                            style={linkStyle}
+                                        >
+                                            SiliconFlow Cloud
+                                        </a>{' '}
+                                        {t('to get your API Key.')}
+                                    </div>
+                                }
+                            >
+                                <Input autoFocus type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem
+                                name='siliconFlowAPIModel'
+                                label={t('API Model')}
+                                required={values.provider === 'SiliconFlow'}
+                            >
+                                <APIModelSelector
+                                    provider='SiliconFlow'
+                                    currentProvider={values.provider}
+                                    apiKey={values.siliconFlowAPIKey}
+                                    onBlur={onBlur}
+                                />
+                            </FormItem>
+                        </div>
+                        <div
+                            style={{
+                                display: values.provider === 'DashScope' ? 'block' : 'none',
+                            }}
+                        >
+                            <FormItem
+                                required={values.provider === 'DashScope'}
+                                name='dashScopeAPIKey'
+                                label='DashScope API Key'
+                                caption={
+                                    <div>
+                                        {t('Go to the')}{' '}
+                                        <a
+                                            target='_blank'
+                                            href='https://bailian.console.aliyun.com/?apiKey=1'
+                                            rel='noreferrer'
+                                            style={linkStyle}
+                                        >
+                                            Alibaba Bailian
+                                        </a>{' '}
+                                        {t('to get your API Key.')}
+                                    </div>
+                                }
+                            >
+                                <Input autoFocus type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem
+                                name='dashScopeAPIModel'
+                                label={t('API Model')}
+                                required={values.provider === 'DashScope'}
+                            >
+                                <APIModelSelector
+                                    provider='DashScope'
+                                    currentProvider={values.provider}
+                                    apiKey={values.dashScopeAPIKey}
+                                    onBlur={onBlur}
+                                />
+                            </FormItem>
+                        </div>
+                        <div
+                            style={{
+                                display: values.provider === 'Zhipu' ? 'block' : 'none',
+                            }}
+                        >
+                            <FormItem
+                                required={values.provider === 'Zhipu'}
+                                name='zhipuAPIKey'
+                                label='Zhipu API Key'
+                                caption={
+                                    <div>
+                                        {t('Go to the')}{' '}
+                                        <a
+                                            target='_blank'
+                                            href='https://open.bigmodel.cn/usercenter/apikeys'
+                                            rel='noreferrer'
+                                            style={linkStyle}
+                                        >
+                                            Zhipu Open Platform
+                                        </a>{' '}
+                                        {t('to get your API Key.')}
+                                    </div>
+                                }
+                            >
+                                <Input autoFocus type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem
+                                name='zhipuAPIModel'
+                                label={t('API Model')}
+                                required={values.provider === 'Zhipu'}
+                            >
+                                <APIModelSelector
+                                    provider='Zhipu'
+                                    currentProvider={values.provider}
+                                    apiKey={values.zhipuAPIKey}
+                                    onBlur={onBlur}
+                                />
+                            </FormItem>
+                            <FormItem
+                                name='zhipuAPIURL'
+                                label={t('API URL')}
+                                required={values.provider === 'Zhipu'}
+                                caption={t(
+                                    'Defaults to the Zhipu open platform (open.bigmodel.cn). Use https://api.z.ai/api for the international Z.ai endpoint.'
+                                )}
+                            >
+                                <Input size='compact' onBlur={onBlur} />
+                            </FormItem>
+                        </div>
+                        <div
+                            style={{
+                                display: values.provider === 'MiMo' ? 'block' : 'none',
+                            }}
+                        >
+                            <FormItem
+                                required={values.provider === 'MiMo'}
+                                name='mimoAPIKey'
+                                label='MiMo API Key'
+                                caption={
+                                    <div>
+                                        {t('Go to the')}{' '}
+                                        <a
+                                            target='_blank'
+                                            href='https://www.xiaomimimo.com/'
+                                            rel='noreferrer'
+                                            style={linkStyle}
+                                        >
+                                            Xiaomi MiMo Open Platform
+                                        </a>{' '}
+                                        {t('to get your API Key.')}
+                                    </div>
+                                }
+                            >
+                                <Input autoFocus type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem name='mimoAPIModel' label={t('API Model')} required={values.provider === 'MiMo'}>
+                                <APIModelSelector
+                                    provider='MiMo'
+                                    currentProvider={values.provider}
+                                    apiKey={values.mimoAPIKey}
+                                    onBlur={onBlur}
+                                />
+                            </FormItem>
+                        </div>
+                        <div
+                            style={{
+                                display: values.provider === 'Custom' ? 'block' : 'none',
+                            }}
+                        >
+                            <FormItem
+                                name='customAPIURL'
+                                label={t('API URL')}
+                                required={values.provider === 'Custom'}
+                                caption={t(
+                                    'The base URL of any OpenAI-compatible API endpoint, e.g. https://api.example.com/v1. Local services can use http://localhost:11434/v1.'
+                                )}
+                            >
+                                <Input
+                                    autoFocus
+                                    size='compact'
+                                    onBlur={onBlur}
+                                    placeholder='https://api.example.com/v1'
+                                />
+                            </FormItem>
+                            <FormItem
+                                name='customAPIURLPath'
+                                label={t('API URL Path')}
+                                required={values.provider === 'Custom'}
+                                caption={t(
+                                    'The endpoint path appended to the API URL. Leave the default /v1/chat/completions unless your provider documents a different one.'
+                                )}
+                            >
+                                <Input size='compact' onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem
+                                name='customAPIKey'
+                                label={t('API Key')}
+                                caption={t('Leave blank if your endpoint does not require authentication.')}
+                            >
+                                <Input type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem
+                                name='customAPIModel'
+                                label={t('API Model')}
+                                required={values.provider === 'Custom'}
+                            >
+                                <APIModelSelector
+                                    provider='Custom'
+                                    currentProvider={values.provider}
+                                    apiKey={values.customAPIKey}
+                                    onBlur={onBlur}
+                                />
+                            </FormItem>
+                        </div>
+                        <div
+                            style={{
+                                display: values.provider === 'OpenCode' ? 'block' : 'none',
+                            }}
+                        >
+                            <FormItem
+                                required={values.provider === 'OpenCode'}
+                                name='openCodeAPIKey'
+                                label='OpenCode API Key'
+                                caption={
+                                    <div>
+                                        {t('Go to the')}{' '}
+                                        <a
+                                            target='_blank'
+                                            href='https://opencode.ai/console'
+                                            rel='noreferrer'
+                                            style={linkStyle}
+                                        >
+                                            OpenCode Console
+                                        </a>{' '}
+                                        {t('to get your API Key.')}
+                                        <br />
+                                        {t('Requires an active OpenCode Go or Go Plus subscription.')}
+                                    </div>
+                                }
+                            >
+                                <Input autoFocus type='password' size='compact' onBlur={onBlur} />
+                            </FormItem>
+                            <FormItem
+                                name='openCodeAPIModel'
+                                label={t('API Model')}
+                                required={values.provider === 'OpenCode'}
+                            >
+                                <APIModelSelector
+                                    provider='OpenCode'
+                                    currentProvider={values.provider}
+                                    apiKey={values.openCodeAPIKey}
+                                    onBlur={onBlur}
+                                />
+                            </FormItem>
+                        </div>
                         <FormItem
                             name='thinkingEnabled'
                             label={t('Enable Thinking')}
@@ -3469,6 +3500,7 @@ export function InnerSettings({
                             <TranslateModeSelector onBlur={onBlur} />
                         </FormItem>
                         <PerActionModelConfig settings={values} />
+                        <PolishingSummarizeProviderCard values={values} onBlur={onBlur} />
                         <FormItem name='defaultTargetLanguage' label={t('Default target language')}>
                             <LanguageSelector onBlur={onBlur} />
                         </FormItem>
@@ -3589,15 +3621,6 @@ export function InnerSettings({
                         >
                             <MyCheckbox onBlur={onBlur} />
                         </FormItem>
-                        <FormItem
-                            style={{
-                                display: isDesktopApp ? 'block' : 'none',
-                            }}
-                            name='disableCollectingStatistics'
-                            label={t('disable collecting statistics')}
-                        >
-                            <MyCheckbox onBlur={onBlur} />
-                        </FormItem>
                     </div>
                     <div
                         style={{
@@ -3684,8 +3707,24 @@ export function InnerSettings({
                             display: activeTab === 'shortcuts' ? 'block' : 'none',
                         }}
                     >
-                        <FormItem name='hotkey' label={t('Hotkey')}>
+                        <FormItem
+                            name='hotkey'
+                            label={t('Hotkey')}
+                            caption={t('Translate the currently selected text with this hotkey.')}
+                        >
                             <HotkeyRecorder onBlur={onBlur} testId='hotkey-recorder' />
+                        </FormItem>
+                        <FormItem
+                            style={{
+                                display: isDesktopApp ? 'block' : 'none',
+                            }}
+                            name='showSelectionIcon'
+                            label={t('Show the translation icon on selection')}
+                            caption={t(
+                                'Turn off to skip the floating icon and translate selected text with the hotkey instead.'
+                            )}
+                        >
+                            <MyCheckbox onBlur={onBlur} />
                         </FormItem>
                         <FormItem name='displayWindowHotkey' label={t('Display window Hotkey')}>
                             <HotkeyRecorder onBlur={onBlur} testId='display-window-hotkey-recorder' />
@@ -3745,89 +3784,6 @@ export function InnerSettings({
                     }}
                 />
             )}
-            <Modal
-                isOpen={showBuyMeACoffee}
-                onClose={() => setShowBuyMeACoffee(false)}
-                closeable
-                size='auto'
-                autoFocus
-                animate
-            >
-                <ModalHeader
-                    style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                    }}
-                >
-                    {'❤️  ' + t('Buy me a coffee')}
-                </ModalHeader>
-                <ModalBody>
-                    <div
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: 10,
-                        }}
-                    >
-                        <div>{t('If you find this tool helpful, you can buy me a cup of coffee.')}</div>
-                        <div>
-                            <img width='330' src={wechat} />
-                        </div>
-                        <div>
-                            <img width='330' src={alipay} />
-                        </div>
-                    </div>
-                </ModalBody>
-            </Modal>
-            <Modal
-                isOpen={!!disclaimerPromotion}
-                onClose={() => setDisclaimerPromotion(undefined)}
-                closeable
-                size='auto'
-                autoFocus
-                animate
-            >
-                <ModalHeader>{t('Disclaimer')}</ModalHeader>
-                <ModalBody className={styles.disclaimer}>
-                    {disclaimerPromotion ? renderI18nPromotionContent(disclaimerPromotion.disclaimer) : ''}
-                </ModalBody>
-                <ModalFooter>
-                    <ModalButton
-                        size='compact'
-                        kind='tertiary'
-                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setDisclaimerPromotion(undefined)
-                        }}
-                    >
-                        {t('Disagree')}
-                    </ModalButton>
-                    <ModalButton
-                        size='compact'
-                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                            e.stopPropagation()
-                            e.preventDefault()
-                            if (isTauri) {
-                                void trackTauriEvent('promotion_clicked', { id: openaiAPIKeyPromotion?.id ?? '' })
-                                if (disclaimerAgreeLink) {
-                                    void import('@tauri-apps/plugin-shell')
-                                        .then(({ open }) => open(disclaimerAgreeLink))
-                                        .catch((error) => {
-                                            console.error('Failed to open disclaimer link', error)
-                                        })
-                                }
-                            } else {
-                                window.open(disclaimerAgreeLink)
-                            }
-                        }}
-                    >
-                        {t('Agree and continue')}
-                    </ModalButton>
-                </ModalFooter>
-            </Modal>
         </div>
     )
 }

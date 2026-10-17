@@ -56,6 +56,12 @@ export interface ISettings {
     apiURLPath: string
     apiModel: string
     provider: Provider
+    // One shared LLM interface for polishing AND summarizing, kept apart
+    // from the global (translation) provider so a free-MT global provider
+    // never breaks those LLM-only modes.
+    polishingSummarizeUseSeparateProvider?: boolean
+    polishingSummarizeProvider?: Provider
+    polishingSummarizeAPIModel: string
     chatgptModel: string
     azureAPIKeys: string
     azureAPIURL: string
@@ -100,7 +106,6 @@ export interface ISettings {
     selectInputElementsText?: boolean
     readSelectedWordsFromInputElementsText?: boolean
     runAtStartup?: boolean
-    disableCollectingStatistics?: boolean
     allowUsingClipboardWhenSelectedTextNotAvailable?: boolean
     pinned?: boolean
     autoCollect?: boolean
@@ -149,6 +154,21 @@ export interface ISettings {
     liteLLMAPIURL: string
     liteLLMAPIKey: string
     liteLLMAPIModel: string
+    siliconFlowAPIKey: string
+    siliconFlowAPIModel: string
+    dashScopeAPIKey: string
+    dashScopeAPIModel: string
+    zhipuAPIURL: string
+    zhipuAPIKey: string
+    zhipuAPIModel: string
+    mimoAPIKey: string
+    mimoAPIModel: string
+    customAPIURL: string
+    customAPIURLPath: string
+    customAPIKey: string
+    customAPIModel: string
+    openCodeAPIKey: string
+    openCodeAPIModel: string
     fontSize: number
     uiFontSize: number
     iconSize: number
@@ -156,4 +176,5 @@ export interface ISettings {
     claudeThinking: boolean
     claudeThinkingLevel: 'low' | 'medium' | 'high'
     useCompactLookup?: boolean
+    showSelectionIcon?: boolean
 }

@@ -36,7 +36,6 @@ use enigo::*;
 use parking_lot::Mutex;
 use std::{thread, time::Duration};
 use tauri::{Emitter, Manager};
-use tauri_plugin_aptabase::EventTracker;
 
 static IS_WRITING: Mutex<bool> = Mutex::new(false);
 static IS_FIRST_CHUNK: Mutex<bool> = Mutex::new(true);
@@ -111,8 +110,6 @@ pub fn writing_command() {
         Some(guard) => guard,
         None => return,
     };
-    let app_handle = APP_HANDLE.get().unwrap();
-    let _ = app_handle.track_event("writing", None);
 
     // Reset per-invocation state.
     *IS_FIRST_CHUNK.lock() = true;

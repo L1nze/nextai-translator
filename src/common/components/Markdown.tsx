@@ -8,6 +8,7 @@ import {
     CSSProperties,
     HTMLAttributeAnchorTarget,
     HTMLAttributes,
+    memo,
     ReactNode,
     useMemo,
 } from 'react'
@@ -31,7 +32,10 @@ interface MarkdownElementProps extends HTMLAttributes<HTMLElement> {
     node?: unknown
 }
 
-export function Markdown({
+// Memoized: the translated text re-renders this tree on every stream flush,
+// so unrelated state changes in the parent (typing in the input, TTS state)
+// must not trigger a full remark re-parse of the accumulated text.
+function MarkdownBase({
     children,
     linkTarget,
     renderText,
@@ -197,3 +201,5 @@ export function Markdown({
         </ReactMarkdown>
     )
 }
+
+export const Markdown = memo(MarkdownBase)

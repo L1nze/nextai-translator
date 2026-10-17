@@ -4,7 +4,7 @@ import { onSettingsSave } from '../utils'
 
 export function SettingsWindow() {
     return (
-        <Window windowsTitlebarDisableDarkMode>
+        <Window windowsTitlebarDisableDarkMode opaque>
             <InnerSettings showFooter onSave={onSettingsSave} />
         </Window>
     )
