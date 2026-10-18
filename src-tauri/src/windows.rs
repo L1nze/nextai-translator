@@ -4,7 +4,6 @@ use crate::utils;
 use crate::UpdateResult;
 use crate::ALWAYS_ON_TOP;
 use crate::APP_HANDLE;
-use active_win_pos_rs::get_active_window;
 #[cfg(target_os = "macos")]
 use cocoa::appkit::NSWindow;
 use debug_print::debug_println;
@@ -170,8 +169,12 @@ fn restore_clipboard(saved: SavedClipboard) {
 /// dropped instead of sent, and the popup reopens still showing the
 /// previous translation. Instead, poll the clipboard sequence number
 /// until it actually changes, bounded at ~600ms.
+///
+/// `pub(crate)`: the mouse hook's selection branch uses this same polling
+/// implementation instead of the old fixed-sleep crate path, so there is
+/// exactly one selection-capture implementation.
 #[cfg(target_os = "windows")]
-fn read_selected_text() -> String {
+pub(crate) fn read_selected_text() -> String {
     use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
     let saved = save_clipboard();
@@ -215,7 +218,7 @@ fn read_selected_text() -> String {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn read_selected_text() -> String {
+pub(crate) fn read_selected_text() -> String {
     match get_selected_text() {
         Ok(text) => text,
         Err(e) => {
@@ -235,26 +238,122 @@ pub async fn show_translator_window_with_selected_text_command() {
         .and_then(|conf| conf.restore_previous_position)
         .unwrap_or(false);
 
-    let selected_text = read_selected_text();
+    // Summon pipeline. The selection capture below can block for hundreds
+    // of milliseconds (Ctrl+C synthesis + clipboard polling), and it needs
+    // the PREVIOUSLY focused app to still own the keyboard — so display the
+    // panel right away WITHOUT activating it, capture while the old app
+    // keeps focus, and only then focus + deliver the text. The old order
+    // (capture fully, then show) was the entire "pressed the hotkey and
+    // nothing happened for ~600ms" gap.
+    let window = get_translator_window(false, false, false);
+    if !restore_previous_position {
+        let target = compute_translator_position_near_cursor(&window);
+        show_window_no_activate(&window, Some(target));
+    } else {
+        show_window_no_activate(&window, None);
+    }
 
-    // Show the translator window only after we've captured the current selection.
-    let window = show_translator_window(false, true, true);
+    let selected_text = read_selected_text();
 
     if !selected_text.trim().is_empty() {
         utils::send_text(selected_text);
     }
 
-    if !restore_previous_position {
-        position_translator_window_to_cursor(&window);
-    }
     focus_translator_window(&window);
     utils::show();
 }
 
-fn is_translator_foreground() -> bool {
-    match get_active_window() {
-        Ok(window) => window.process_id == std::process::id() as u64,
-        Err(_) => false,
+/// Pure math half of the old `position_translator_window_to_cursor`:
+/// mouse position clamped against the monitor that contains the cursor,
+/// computed once per summon. `show_window_no_activate` folds the resulting
+/// position into the same native call that reveals the window, so the
+/// window never flashes at its previous position.
+fn compute_translator_position_near_cursor(window: &tauri::WebviewWindow) -> PhysicalPosition<i32> {
+    let current_monitor = get_current_monitor();
+    let window_physical_size = window.outer_size().unwrap_or_default();
+    let (mouse_logical_x, mouse_logical_y) = get_mouse_location().unwrap_or((0, 0));
+    let scale_factor = window.scale_factor().unwrap_or(1.0);
+    let mut mouse_physical_position = PhysicalPosition::new(mouse_logical_x, mouse_logical_y);
+    if cfg!(target_os = "macos") {
+        mouse_physical_position =
+            LogicalPosition::new(mouse_logical_x as f64, mouse_logical_y as f64).to_physical(scale_factor);
+    }
+
+    let monitor_physical_size = current_monitor.size();
+    let monitor_physical_position = current_monitor.position();
+
+    let mut target = mouse_physical_position;
+    if target.x < monitor_physical_position.x {
+        target.x = monitor_physical_position.x;
+    }
+    if target.y < monitor_physical_position.y {
+        target.y = monitor_physical_position.y;
+    }
+    if target.x + (window_physical_size.width as i32)
+        > monitor_physical_position.x + (monitor_physical_size.width as i32)
+    {
+        target.x = monitor_physical_position.x
+            + (monitor_physical_size.width as i32)
+            - (window_physical_size.width as i32);
+    }
+    if target.y + (window_physical_size.height as i32)
+        > monitor_physical_position.y + (monitor_physical_size.height as i32)
+    {
+        target.y = monitor_physical_position.y
+            + (monitor_physical_size.height as i32)
+            - (window_physical_size.height as i32);
+    }
+    target
+}
+
+/// Display `window` (optionally moving it first) WITHOUT making it the
+/// foreground window, so the previously focused app keeps keyboard focus —
+/// required while the selection is still being captured via synthesized
+/// Ctrl+C. Falls back to the portable show path if the native call fails.
+fn show_window_no_activate(window: &tauri::WebviewWindow, position: Option<PhysicalPosition<i32>>) {
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+        };
+        // Move + reveal in ONE native call (two separate round trips would
+        // let the window flash at its old position first); HWND_TOP lifts it
+        // above the previous app while SWP_NOACTIVATE preserves that app's
+        // keyboard focus. Without a target position, SWP_NOMOVE also skips
+        // reading the current position back.
+        let (x, y, no_move) = match position {
+            Some(target) => (target.x, target.y, false),
+            None => (0, 0, true),
+        };
+        let mut flags = SWP_NOACTIVATE | SWP_NOSIZE | SWP_SHOWWINDOW;
+        if no_move {
+            flags |= SWP_NOMOVE;
+        }
+        let placed = unsafe { SetWindowPos(hwnd, Some(HWND_TOP), x, y, 0, 0, flags) };
+        if placed.is_ok() {
+            nudge_webview_visibility(window);
+            return;
+        }
+    }
+    // Portable fallback.
+    if let Some(target) = position {
+        let _ = window.set_position(target);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // orderFront: displays without making the window key, keeping the
+        // keyboard with the app whose selection is about to be captured.
+        let _ = window.with_webview(|webview| unsafe {
+            use cocoa::base::{id, nil};
+            use objc::{msg_send, sel, sel_impl};
+            let wv = webview.inner() as id;
+            let ns_win: id = msg_send![wv, window];
+            let _: () = msg_send![ns_win, orderFront: nil];
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window.show();
     }
 }
 
@@ -283,38 +382,51 @@ pub async fn hide_translator_window() {
     do_hide_translator_window();
 }
 
-pub fn delete_thumb() {
-    match APP_HANDLE.get() {
-        Some(handle) => match handle.get_webview_window(THUMB_WIN_NAME) {
-            Some(window) => {
-                window.close().unwrap();
-            }
-            None => {}
-        },
-        None => {}
+// Cached physical rect of the visible thumb window. The mouse hook
+// hit-tests EVERY left-button release system-wide; querying the window's
+// position/size over IPC there cost three synchronous main-thread round
+// trips per click (main.rs), for a 20x20 pixel comparison.
+static THUMB_RECT: parking_lot::Mutex<Option<(i32, i32, i32, i32)>> = parking_lot::Mutex::new(None);
+
+/// Zero-IPC hit test used by the mouse hook: is the screen point over the
+/// (visible) thumb window?
+pub fn is_thumb_hit(x: i32, y: i32) -> bool {
+    match *THUMB_RECT.lock() {
+        Some((x1, y1, x2, y2)) => x >= x1 && x <= x2 && y >= y1 && y <= y2,
+        None => false,
     }
 }
 
 pub fn close_thumb() {
-    match APP_HANDLE.get() {
-        Some(handle) => match handle.get_webview_window(THUMB_WIN_NAME) {
-            Some(window) => {
-                window
-                    .set_position(LogicalPosition::new(-100.0, -100.0))
-                    .unwrap();
-                window.set_always_on_top(false).unwrap();
-                window.hide().unwrap();
-            }
-            None => {}
-        },
-        None => {}
+    // Already hidden: the common case after any ordinary click, and the
+    // whole point of the cache — no IPC at all.
+    if THUMB_RECT.lock().take().is_none() {
+        return;
+    }
+    if let Some(handle) = APP_HANDLE.get() {
+        if let Some(window) = handle.get_webview_window(THUMB_WIN_NAME) {
+            let _ = window.hide();
+            // Keep the hidden WebView2 from compositing (#1883).
+            set_webview_visibility(&window, false);
+        }
     }
 }
 
 pub fn show_thumb(x: i32, y: i32) {
     let window = get_thumb_window(x, y);
+    set_webview_visibility(&window, true);
     window.show().unwrap();
     nudge_webview_visibility(&window);
+    // Cache the placed rect for the hook's hit test. We are on the
+    // selection worker thread here, so the two queries are off the hot path.
+    if let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) {
+        *THUMB_RECT.lock() = Some((
+            position.x,
+            position.y,
+            position.x + size.width as i32,
+            position.y + size.height as i32,
+        ));
+    }
 }
 
 pub fn get_thumb_window(x: i32, y: i32) -> tauri::WebviewWindow {
@@ -665,53 +777,6 @@ pub fn show_translator_window(
         });
     }
     window
-}
-
-fn position_translator_window_to_cursor(window: &tauri::WebviewWindow) {
-    let current_monitor = get_current_monitor();
-    let mouse_position = get_mouse_location();
-    let window_physical_size = window.outer_size();
-    if mouse_position.is_err() || window_physical_size.is_err() {
-        return;
-    }
-    let (mouse_logical_x, mouse_logical_y) = mouse_position.unwrap();
-    let window_physical_size = window_physical_size.unwrap();
-    let scale_factor = window.scale_factor().unwrap_or(1.0);
-    let mut mouse_physical_position = PhysicalPosition::new(mouse_logical_x, mouse_logical_y);
-    if cfg!(target_os = "macos") {
-        mouse_physical_position =
-            LogicalPosition::new(mouse_logical_x as f64, mouse_logical_y as f64)
-                .to_physical(scale_factor);
-    }
-
-    let monitor_physical_size = current_monitor.size();
-    let monitor_physical_position = current_monitor.position();
-
-    let mut window_physical_position = mouse_physical_position;
-    if window_physical_position.x < monitor_physical_position.x {
-        window_physical_position.x = monitor_physical_position.x;
-    }
-    if window_physical_position.y < monitor_physical_position.y {
-        window_physical_position.y = monitor_physical_position.y;
-    }
-    if window_physical_position.x + (window_physical_size.width as i32)
-        > monitor_physical_position.x + (monitor_physical_size.width as i32)
-    {
-        window_physical_position.x = monitor_physical_position.x
-            + (monitor_physical_size.width as i32)
-            - (window_physical_size.width as i32);
-    }
-    if window_physical_position.y + (window_physical_size.height as i32)
-        > monitor_physical_position.y + (monitor_physical_size.height as i32)
-    {
-        window_physical_position.y = monitor_physical_position.y
-            + (monitor_physical_size.height as i32)
-            - (window_physical_size.height as i32);
-    }
-
-    if let Err(e) = window.set_position(window_physical_position) {
-        eprintln!("Error setting translator window position: {}", e);
-    }
 }
 
 fn focus_translator_window(window: &tauri::WebviewWindow) {

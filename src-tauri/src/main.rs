@@ -17,7 +17,6 @@ mod writing;
 
 use config::get_config;
 use debug_print::debug_println;
-use get_selected_text::get_selected_text;
 use insertion::{
     insert_translation_into_previous_input, remember_active_window, remember_active_window_command,
 };
@@ -52,8 +51,7 @@ use mouce::{Mouse, MouseActions};
 use once_cell::sync::OnceCell;
 #[cfg(debug_assertions)]
 use specta_typescript::{formatter::prettier, Typescript};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize};
-use tauri::{Manager, PhysicalPosition, PhysicalSize};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tiny_http::{Response as HttpResponse, Server};
 use tokio::runtime::{
@@ -190,7 +188,7 @@ fn bind_mouse_hook() {
                 let config = config::get_config().unwrap();
                 let always_show_icons = config.always_show_icons.unwrap_or(true);
                 if !always_show_icons {
-                    windows::delete_thumb();
+                    windows::close_thumb();
                     return;
                 }
                 let current_release_time = std::time::SystemTime::now()
@@ -224,53 +222,10 @@ fn bind_mouse_hook() {
                 if previous_release_time != 0 && is_double_click {
                     is_text_selected_event = true;
                 }
-                let is_click_on_thumb = match APP_HANDLE.get() {
-                    Some(handle) => match handle.get_webview_window(windows::THUMB_WIN_NAME) {
-                        Some(window) => match window.outer_position() {
-                            Ok(position) => {
-                                let scale_factor = window.scale_factor().unwrap_or(1.0);
-                                if let Ok(size) = window.outer_size() {
-                                    if cfg!(target_os = "macos") {
-                                        let LogicalPosition { x: x1, y: y1 } =
-                                            position.to_logical::<i32>(scale_factor);
-                                        let LogicalSize {
-                                            width: mut w,
-                                            height: mut h,
-                                        } = size.to_logical::<i32>(scale_factor);
-                                        if cfg!(target_os = "windows") {
-                                            w = (20.0 as f64 * scale_factor) as i32;
-                                            h = (20.0 as f64 * scale_factor) as i32;
-                                        }
-                                        let (x2, y2) = (x1 + w, y1 + h);
-                                        let res = x >= x1 && x <= x2 && y >= y1 && y <= y2;
-                                        res
-                                    } else {
-                                        let PhysicalPosition { x: x1, y: y1 } = position;
-                                        let PhysicalSize {
-                                            width: mut w,
-                                            height: mut h,
-                                        } = size;
-                                        if cfg!(target_os = "windows") {
-                                            w = (20.0 as f64 * scale_factor) as u32;
-                                            h = (20.0 as f64 * scale_factor) as u32;
-                                        }
-                                        let (x2, y2) = (x1 + w as i32, y1 + h as i32);
-                                        let res = x >= x1 && x <= x2 && y >= y1 && y <= y2;
-                                        res
-                                    }
-                                } else {
-                                    false
-                                }
-                            }
-                            Err(err) => {
-                                println!("err: {:?}", err);
-                                false
-                            }
-                        },
-                        None => false,
-                    },
-                    None => false,
-                };
+                // Zero-IPC hit test against the cached thumb rect — the old
+                // version queried outer_position/scale_factor/outer_size on
+                // every left-button release system-wide.
+                let is_click_on_thumb = windows::is_thumb_hit(x, y);
                 // debug_println!("is_text_selected_event: {}", is_text_selected_event);
                 // debug_println!("is_click_on_thumb: {}", is_click_on_thumb);
                 if !is_text_selected_event && !is_click_on_thumb {
@@ -299,7 +254,7 @@ fn bind_mouse_hook() {
                         }
 
                     let _lock = RELEASE_THREAD_ID.lock();
-                    let selected_text = get_selected_text().unwrap_or_default();
+                    let selected_text = windows::read_selected_text();
                     if !selected_text.is_empty() {
                         {
                             *SELECTED_TEXT.lock() = selected_text;
@@ -321,20 +276,29 @@ fn bind_mouse_hook() {
                     windows::close_thumb();
                     let selected_text = (*SELECTED_TEXT.lock()).to_string();
                     if !selected_text.is_empty() {
-                        let use_compact = config::get_config()
-                            .ok()
-                            .and_then(|c| c.use_compact_lookup)
-                            .unwrap_or(false);
-                        if use_compact {
-                            let window = windows::show_inline_lookup_window(false, true, false);
-                            utils::send_text(selected_text);
-                            let _ = window.set_focus();
-                        } else {
-                            remember_active_window();
-                            let window = windows::show_translator_window(false, true, false);
-                            utils::send_text(selected_text);
-                            window.set_focus().unwrap();
+                        if RELEASE_THREAD_ID.is_locked() {
+                            return;
                         }
+                        // Summon off the hook callback: the full window
+                        // pipeline used to run synchronously right here,
+                        // stalling every mouse event behind it.
+                        std::thread::spawn(move || {
+                            let _lock = RELEASE_THREAD_ID.lock();
+                            let use_compact = config::get_config()
+                                .ok()
+                                .and_then(|c| c.use_compact_lookup)
+                                .unwrap_or(false);
+                            if use_compact {
+                                let window = windows::show_inline_lookup_window(false, true, false);
+                                utils::send_text(selected_text);
+                                let _ = window.set_focus();
+                            } else {
+                                remember_active_window();
+                                let window = windows::show_translator_window(false, true, false);
+                                utils::send_text(selected_text);
+                                let _ = window.set_focus();
+                            }
+                        });
                     }
                 }
             }
@@ -457,6 +421,19 @@ fn main() {
             app_handle.plugin(tauri_plugin_updater::Builder::new().build())?;
             // create thumb window
             let _ = windows::get_thumb_window(0, 0);
+            // If the selection icon can never show, suspend the pre-created
+            // thumb's WebView2 renderer — a hidden webview whose controller
+            // still reports IsVisible=TRUE composites forever (#1883).
+            {
+                let config = config::get_config().unwrap_or_default();
+                let always_show_icons = config.always_show_icons.unwrap_or(true);
+                let show_selection_icon = config.show_selection_icon.unwrap_or(true);
+                if !always_show_icons || !show_selection_icon {
+                    if let Some(window) = app.get_webview_window(windows::THUMB_WIN_NAME) {
+                        windows::set_webview_visibility(&window, false);
+                    }
+                }
+            }
             // Pre-create the Quick Translator and writing-indicator panels —
             // but ONLY on macOS. There the raw cocoa msg_send calls (setLevel:,
             // etc.) must run on the AppKit main thread; if we let creation
