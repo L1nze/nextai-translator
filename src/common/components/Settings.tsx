@@ -2634,24 +2634,6 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                                 required={values.provider === 'Kimi' && utils.isDesktopApp()}
                                 name='kimiRefreshToken'
                                 label='Kimi Refresh Token'
-                                caption={
-                                    <div>
-                                        {t('Go to the')}{' '}
-                                        <a
-                                            target='_blank'
-                                            href={
-                                                values?.i18n?.toLowerCase().includes('zh')
-                                                    ? 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/kimi-cn.md'
-                                                    : 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/kimi.md'
-                                            }
-                                            rel='noreferrer'
-                                            style={linkStyle}
-                                        >
-                                            Tutorial
-                                        </a>{' '}
-                                        {t('to get your refresh_token.')}
-                                    </div>
-                                }
                             >
                                 <Input autoFocus type='password' size='compact' onBlur={onBlur} />
                             </FormItem>
@@ -2659,24 +2641,6 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                                 required={values.provider === 'Kimi' && utils.isDesktopApp()}
                                 name='kimiAccessToken'
                                 label='Kimi Access Token'
-                                caption={
-                                    <div>
-                                        {t('Go to the')}{' '}
-                                        <a
-                                            target='_blank'
-                                            href={
-                                                values?.i18n?.toLowerCase().includes('zh')
-                                                    ? 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/kimi-cn.md'
-                                                    : 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/kimi.md'
-                                            }
-                                            rel='noreferrer'
-                                            style={linkStyle}
-                                        >
-                                            Tutorial
-                                        </a>{' '}
-                                        {t('to get your access_token.')}
-                                    </div>
-                                }
                             >
                                 <Input autoFocus type='password' size='compact' onBlur={onBlur} />
                             </FormItem>
@@ -2690,24 +2654,6 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                                 required={values.provider === 'ChatGLM' && utils.isDesktopApp()}
                                 name='chatglmRefreshToken'
                                 label={`${t('ChatGLM')} Refresh Token`}
-                                caption={
-                                    <div>
-                                        {t('Go to the')}{' '}
-                                        <a
-                                            target='_blank'
-                                            href={
-                                                values?.i18n?.toLowerCase().includes('zh')
-                                                    ? 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatglm-cn.md'
-                                                    : 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatglm.md'
-                                            }
-                                            rel='noreferrer'
-                                            style={linkStyle}
-                                        >
-                                            Tutorial
-                                        </a>{' '}
-                                        {t('to get your refresh_token.')}
-                                    </div>
-                                }
                             >
                                 <Input autoFocus type='password' size='compact' onBlur={onBlur} />
                             </FormItem>
@@ -2715,24 +2661,6 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                                 required={values.provider === 'ChatGLM' && utils.isDesktopApp()}
                                 name='chatglmAccessToken'
                                 label={`${t('ChatGLM')} Token`}
-                                caption={
-                                    <div>
-                                        {t('Go to the')}{' '}
-                                        <a
-                                            target='_blank'
-                                            href={
-                                                values?.i18n?.toLowerCase().includes('zh')
-                                                    ? 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatglm-cn.md'
-                                                    : 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatglm.md'
-                                            }
-                                            rel='noreferrer'
-                                            style={linkStyle}
-                                        >
-                                            Tutorial
-                                        </a>{' '}
-                                        {t('to get your token.')}
-                                    </div>
-                                }
                             >
                                 <Input autoFocus type='password' size='compact' onBlur={onBlur} />
                             </FormItem>
@@ -3536,33 +3464,7 @@ export function InnerSettings({ onSave, showFooter = false }: IInnerSettingsProp
                         >
                             <NumberInput min={8} max={24} step={1} />
                         </FormItem>
-                        <FormItem
-                            name='alwaysShowIcons'
-                            label={t('Show icon when text is selected')}
-                            caption={
-                                isDesktopApp && (
-                                    <div
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                        }}
-                                    >
-                                        {t(
-                                            'It is highly recommended to disable this feature and use the Clip Extension'
-                                        )}
-                                        <a
-                                            href='https://github.com/nextai-translator/nextai-translator/blob/main/CLIP-EXTENSIONS.md'
-                                            target='_blank'
-                                            rel='noreferrer'
-                                            style={linkStyle}
-                                        >
-                                            {t('Clip Extension')}
-                                        </a>
-                                    </div>
-                                )
-                            }
-                        >
+                        <FormItem name='alwaysShowIcons' label={t('Show icon when text is selected')}>
                             <MyCheckbox onBlur={onBlur} />
                         </FormItem>
                         <FormItem name='autoTranslate' label={t('Auto Translate')}>

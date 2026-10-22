@@ -69,7 +69,7 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useDeepCompareCallback } from 'use-deep-compare'
 import { useTranslatorStore, setStoreTranslatedText, setStoreIsTranslating } from '../store'
 import { SpeakerIcon } from './SpeakerIcon'
-import { Provider, engineIcons, getEngine, providerToEngine } from '../engines'
+import { Provider, getEngine, providerToEngine } from '../engines'
 import color from 'color'
 import { useAtom } from 'jotai'
 import { showSettingsAtom } from '../store/setting'
@@ -140,20 +140,6 @@ const useStyles = createUseStyles({
         flexDirection: 'row',
         alignItems: 'center',
         gap: '8px',
-    },
-    'poweredBy': (props: IThemedStyleProps) => ({
-        fontSize: props.theme.sizing.scale300,
-        color: props.theme.colors.contentInverseTertiary,
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: '4px',
-    }),
-    'brand': {
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: '3px',
     },
     'popupCardHeaderContainer': (props: IThemedStyleProps) =>
         props.isDesktopApp
@@ -2592,30 +2578,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                                 </div>
                                             </Tooltip>
                                         </div>
-                                        {settings.provider === 'ChatGPT' && (
-                                            <div
-                                                style={{
-                                                    color: theme.colors.contentPrimary,
-                                                }}
-                                            >
-                                                {t('Go to the')}{' '}
-                                                <a
-                                                    target='_blank'
-                                                    href={
-                                                        settings?.i18n?.toLowerCase().includes('zh')
-                                                            ? 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatgpt-cn.md'
-                                                            : 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatgpt.md'
-                                                    }
-                                                    rel='noreferrer'
-                                                    style={{
-                                                        color: theme.colors.contentSecondary,
-                                                    }}
-                                                >
-                                                    FAQ Page
-                                                </a>{' '}
-                                                {t('to get the solutions.')}
-                                            </div>
-                                        )}
                                     </>
                                 ) : (
                                     <div
@@ -2852,90 +2814,44 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                         </a>
                                     </div>
                                 )}
-                                {isNotLogin && settings?.provider === 'Kimi' && (
+                                {isNotLogin && settings?.provider === 'Kimi' && !isDesktopApp() && (
                                     <div
                                         style={{
                                             fontSize: '12px',
                                             color: theme.colors.contentPrimary,
                                         }}
                                     >
-                                        {isDesktopApp() ? (
-                                            <>
-                                                {t('Go to the')}{' '}
-                                                <a
-                                                    target='_blank'
-                                                    href={
-                                                        settings?.i18n?.toLowerCase().includes('zh')
-                                                            ? 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/kimi-cn.md'
-                                                            : 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/kimi.md'
-                                                    }
-                                                    rel='noreferrer'
-                                                    style={{
-                                                        color: theme.colors.contentSecondary,
-                                                    }}
-                                                >
-                                                    Tutorial
-                                                </a>{' '}
-                                                {t('to get your API Key.')}
-                                            </>
-                                        ) : (
-                                            <>
-                                                <span>{t('Please login to Kimi Web')}: </span>
-                                                <a
-                                                    href='https://kimi.moonshot.cn/'
-                                                    target='_blank'
-                                                    rel='noreferrer'
-                                                    style={{
-                                                        color: theme.colors.contentSecondary,
-                                                    }}
-                                                >
-                                                    Login
-                                                </a>
-                                            </>
-                                        )}
+                                        <span>{t('Please login to Kimi Web')}: </span>
+                                        <a
+                                            href='https://kimi.moonshot.cn/'
+                                            target='_blank'
+                                            rel='noreferrer'
+                                            style={{
+                                                color: theme.colors.contentSecondary,
+                                            }}
+                                        >
+                                            Login
+                                        </a>
                                     </div>
                                 )}
-                                {isNotLogin && settings?.provider === 'ChatGLM' && (
+                                {isNotLogin && settings?.provider === 'ChatGLM' && !isDesktopApp() && (
                                     <div
                                         style={{
                                             fontSize: '12px',
                                             color: theme.colors.contentPrimary,
                                         }}
                                     >
-                                        {isDesktopApp() ? (
-                                            <>
-                                                {t('Go to the')}{' '}
-                                                <a
-                                                    target='_blank'
-                                                    href={
-                                                        settings?.i18n?.toLowerCase().includes('zh')
-                                                            ? 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatglm-cn.md'
-                                                            : 'https://github.com/nextai-translator/nextai-translator/blob/main/docs/chatglm.md'
-                                                    }
-                                                    rel='noreferrer'
-                                                    style={{
-                                                        color: theme.colors.contentSecondary,
-                                                    }}
-                                                >
-                                                    Tutorial
-                                                </a>{' '}
-                                                {t('to get your API Key.')}
-                                            </>
-                                        ) : (
-                                            <>
-                                                <span>{t('Please login to ChatGLM Web')}: </span>
-                                                <a
-                                                    href='https://chatglm.cn/'
-                                                    target='_blank'
-                                                    rel='noreferrer'
-                                                    style={{
-                                                        color: theme.colors.contentSecondary,
-                                                    }}
-                                                >
-                                                    Login
-                                                </a>
-                                            </>
-                                        )}
+                                        <span>{t('Please login to ChatGLM Web')}: </span>
+                                        <a
+                                            href='https://chatglm.cn/'
+                                            target='_blank'
+                                            rel='noreferrer'
+                                            style={{
+                                                color: theme.colors.contentSecondary,
+                                            }}
+                                        >
+                                            Login
+                                        </a>
                                     </div>
                                 )}
                             </div>
@@ -3016,17 +2932,6 @@ function InnerTranslator(props: IInnerTranslatorProps) {
                                     <IoChevronForwardOutline size={15} />
                                 </div>
                             </Tooltip>
-                        </div>
-                    )}
-                    {!showSettings && (
-                        <div className={styles.poweredBy}>
-                            Powered by{' '}
-                            <div className={styles.brand}>
-                                {React.createElement(engineIcons[activateAction?.provider || settings.provider], {
-                                    size: 10,
-                                })}
-                                {activateAction?.provider || settings.provider}
-                            </div>
                         </div>
                     )}
                     {!showSettings && (
