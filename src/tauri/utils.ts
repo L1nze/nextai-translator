@@ -44,7 +44,13 @@ export async function bindHotkey(oldHotKey?: string) {
     if (await isRegistered(settings.hotkey)) {
         await unregister(settings.hotkey)
     }
-    await register(settings.hotkey, () => {
+    // The handler fires on BOTH key press and key release (global-hotkey
+    // synthesizes a Released event by polling GetAsyncKeyState on Windows);
+    // without this filter every hotkey press runs the command twice.
+    await register(settings.hotkey, (event) => {
+        if (event.state !== 'Pressed') {
+            return
+        }
         return commands.showTranslatorWindowWithSelectedTextCommand()
     }).then(() => {
         console.log('register hotkey success')
@@ -67,7 +73,10 @@ export async function bindDisplayWindowHotkey(oldHotKey?: string) {
     if (await isRegistered(settings.displayWindowHotkey)) {
         await unregister(settings.displayWindowHotkey)
     }
-    await register(settings.displayWindowHotkey, () => {
+    await register(settings.displayWindowHotkey, (event) => {
+        if (event.state !== 'Pressed') {
+            return
+        }
         commands.showTranslatorWindowCommand()
     }).then(() => {
         console.log('register display window hotkey success')
@@ -90,7 +99,10 @@ export async function bindOCRHotkey(oldOCRHotKey?: string) {
     if (await isRegistered(settings.ocrHotkey)) {
         await unregister(settings.ocrHotkey)
     }
-    await register(settings.ocrHotkey, () => {
+    await register(settings.ocrHotkey, (event) => {
+        if (event.state !== 'Pressed') {
+            return
+        }
         return commands.startOcr()
     }).then(() => {
         console.log('OCR hotkey registered')
@@ -113,7 +125,10 @@ export async function bindQuickTranslatorHotkey(oldHotKey?: string) {
     if (await isRegistered(settings.quickTranslatorHotkey)) {
         await unregister(settings.quickTranslatorHotkey)
     }
-    await register(settings.quickTranslatorHotkey, () => {
+    await register(settings.quickTranslatorHotkey, (event) => {
+        if (event.state !== 'Pressed') {
+            return
+        }
         return commands.showQuickTranslatorWindowCommand()
     }).then(() => {
         console.log('quick translator hotkey registered')
@@ -136,7 +151,10 @@ export async function bindWritingHotkey(oldWritingHotKey?: string) {
     if (await isRegistered(settings.writingHotkey)) {
         await unregister(settings.writingHotkey)
     }
-    await register(settings.writingHotkey, () => {
+    await register(settings.writingHotkey, (event) => {
+        if (event.state !== 'Pressed') {
+            return
+        }
         return commands.writingCommand()
     }).then(() => {
         console.log('writing hotkey registered')

@@ -228,9 +228,41 @@ pub(crate) fn read_selected_text() -> String {
     }
 }
 
+// Reentrancy + auto-repeat guard for the summon pipeline below. The pipeline
+// saves the clipboard, synthesizes Ctrl+C and polls it back, so overlapping
+// runs (holding the hotkey down re-fires it at the keyboard repeat rate)
+// would race the clipboard and fight over focus. Drop invocations that
+// arrive while one is in flight or within 700ms of one starting.
+static SUMMON_IN_FLIGHT: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+static LAST_SUMMON: parking_lot::Mutex<Option<std::time::Instant>> =
+    parking_lot::Mutex::new(None);
+
 #[tauri::command]
 #[specta::specta]
 pub async fn show_translator_window_with_selected_text_command() {
+    {
+        let mut last = LAST_SUMMON.lock();
+        let now = std::time::Instant::now();
+        if let Some(t) = *last {
+            if now.duration_since(t) < Duration::from_millis(700) {
+                return;
+            }
+        }
+        *last = Some(now);
+    }
+    let Some(_summon_guard) = SUMMON_IN_FLIGHT.try_lock() else {
+        return;
+    };
+    #[cfg(target_os = "windows")]
+    unsafe {
+        // The hotkey press granted this process the right to take the
+        // foreground, but the selection capture below spends up to ~600ms
+        // injecting Ctrl+C into the previous app, which can forfeit that
+        // right before the focus grab at the end of the pipeline. Re-grant
+        // it now (to "any process", i.e. ourselves later) while it is fresh.
+        use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+    }
     remember_active_window();
     let config = config::get_config().ok();
     let restore_previous_position = config
@@ -238,36 +270,47 @@ pub async fn show_translator_window_with_selected_text_command() {
         .and_then(|conf| conf.restore_previous_position)
         .unwrap_or(false);
 
-    // Summon pipeline. The selection capture below can block for hundreds
-    // of milliseconds (Ctrl+C synthesis + clipboard polling), and it needs
-    // the PREVIOUSLY focused app to still own the keyboard — so display the
-    // panel right away WITHOUT activating it, capture while the old app
-    // keeps focus, and only then focus + deliver the text. The old order
-    // (capture fully, then show) was the entire "pressed the hotkey and
-    // nothing happened for ~600ms" gap.
-    let window = get_translator_window(false, false, false);
+    // Capture before any Windows window-state changes: showing or restoring
+    // the popup can activate it and redirect Ctrl+C away from the source app.
+    #[cfg(target_os = "windows")]
+    let selected_text = read_selected_text();
+
+    // Restore reused windows only after show() synchronizes tao's visibility
+    // state; restoring a hidden minimized window first can flash it.
+    let handle = APP_HANDLE.get().unwrap();
+    let window = match handle.get_webview_window(TRANSLATOR_WIN_NAME) {
+        Some(window) => {
+            #[cfg(not(target_os = "windows"))]
+            let _ = window.unminimize();
+            window
+        }
+        None => get_translator_window(false, false, false),
+    };
     if !restore_previous_position {
         let target = compute_translator_position_near_cursor(&window);
-        show_window_no_activate(&window, Some(target));
+        show_selection_window(&window, Some(target));
     } else {
-        show_window_no_activate(&window, None);
+        show_selection_window(&window, None);
     }
 
+    #[cfg(not(target_os = "windows"))]
     let selected_text = read_selected_text();
 
     if !selected_text.trim().is_empty() {
         utils::send_text(selected_text);
     }
 
+    // macOS initially reveals the window without activation; after capture,
+    // synchronize its visibility before restoring and focusing it.
+    #[cfg(target_os = "macos")]
+    let _ = window.show();
+
     focus_translator_window(&window);
     utils::show();
 }
 
-/// Pure math half of the old `position_translator_window_to_cursor`:
-/// mouse position clamped against the monitor that contains the cursor,
-/// computed once per summon. `show_window_no_activate` folds the resulting
-/// position into the same native call that reveals the window, so the
-/// window never flashes at its previous position.
+/// Compute the cursor position clamped to its monitor before revealing the
+/// window, so it never flashes at its previous position.
 fn compute_translator_position_near_cursor(window: &tauri::WebviewWindow) -> PhysicalPosition<i32> {
     let current_monitor = get_current_monitor();
     let window_physical_size = window.outer_size().unwrap_or_default();
@@ -306,36 +349,10 @@ fn compute_translator_position_near_cursor(window: &tauri::WebviewWindow) -> Phy
     target
 }
 
-/// Display `window` (optionally moving it first) WITHOUT making it the
-/// foreground window, so the previously focused app keeps keyboard focus —
-/// required while the selection is still being captured via synthesized
-/// Ctrl+C. Falls back to the portable show path if the native call fails.
-fn show_window_no_activate(window: &tauri::WebviewWindow, position: Option<PhysicalPosition<i32>>) {
-    #[cfg(target_os = "windows")]
-    if let Ok(hwnd) = window.hwnd() {
-        use windows::Win32::UI::WindowsAndMessaging::{
-            SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
-        };
-        // Move + reveal in ONE native call (two separate round trips would
-        // let the window flash at its old position first); HWND_TOP lifts it
-        // above the previous app while SWP_NOACTIVATE preserves that app's
-        // keyboard focus. Without a target position, SWP_NOMOVE also skips
-        // reading the current position back.
-        let (x, y, no_move) = match position {
-            Some(target) => (target.x, target.y, false),
-            None => (0, 0, true),
-        };
-        let mut flags = SWP_NOACTIVATE | SWP_NOSIZE | SWP_SHOWWINDOW;
-        if no_move {
-            flags |= SWP_NOMOVE;
-        }
-        let placed = unsafe { SetWindowPos(hwnd, Some(HWND_TOP), x, y, 0, 0, flags) };
-        if placed.is_ok() {
-            nudge_webview_visibility(window);
-            return;
-        }
-    }
-    // Portable fallback.
+/// Position before revealing the window. Windows captures the selection first
+/// and uses Tauri's show() so delayed pin changes cannot re-hide the popup via
+/// stale visibility flags. macOS keeps the source app focused during capture.
+fn show_selection_window(window: &tauri::WebviewWindow, position: Option<PhysicalPosition<i32>>) {
     if let Some(target) = position {
         let _ = window.set_position(target);
     }
@@ -779,14 +796,55 @@ pub fn show_translator_window(
     window
 }
 
+/// Bring the translator window to the foreground.
+///
+/// Try SetForegroundWindow first, with AttachThreadInput as the fallback when
+/// the foreground lock refuses activation after selection capture. Same trick
+/// as `insertion::focus_window`.
+#[cfg(target_os = "windows")]
+fn focus_window_native(window: &tauri::WebviewWindow) {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+    };
+
+    let hwnd = match window.hwnd() {
+        Ok(hwnd) => hwnd,
+        Err(e) => {
+            eprintln!("Error getting translator window hwnd: {}", e);
+            return;
+        }
+    };
+
+    unsafe {
+        if GetForegroundWindow() == hwnd || SetForegroundWindow(hwnd).as_bool() {
+            return;
+        }
+        let foreground_thread_id = GetWindowThreadProcessId(GetForegroundWindow(), None);
+        let current_thread_id = GetCurrentThreadId();
+        if foreground_thread_id == 0 || foreground_thread_id == current_thread_id {
+            return;
+        }
+        let _ = AttachThreadInput(foreground_thread_id, current_thread_id, true);
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+        let _ = AttachThreadInput(foreground_thread_id, current_thread_id, false);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn focus_window_native(window: &tauri::WebviewWindow) {
+    if let Err(e) = window.set_focus() {
+        eprintln!("Error focusing translator window: {}", e);
+    }
+}
+
 fn focus_translator_window(window: &tauri::WebviewWindow) {
     if let Err(e) = window.unminimize() {
         eprintln!("Error unminimizing translator window: {}", e);
     }
 
-    if let Err(e) = window.set_focus() {
-        eprintln!("Error focusing translator window: {}", e);
-    }
+    focus_window_native(window);
 
     let should_restore_on_top = !ALWAYS_ON_TOP.load(Ordering::Acquire);
     if let Err(e) = window.set_always_on_top(true) {
@@ -795,12 +853,23 @@ fn focus_translator_window(window: &tauri::WebviewWindow) {
     }
 
     if should_restore_on_top {
-        if let Err(e) = window.set_always_on_top(false) {
-            eprintln!(
-                "Error disabling temporary always on top for translator window: {}",
-                e
-            );
-        }
+        // Hold TOPMOST briefly before restoring the user's pin preference:
+        // if the focus grab above was still refused (e.g. an elevated app
+        // owned the foreground), an instant NOTOPMOST would let the window
+        // sink straight back behind it. `show_translator_window` already
+        // uses this same delayed restore.
+        let w = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            if !ALWAYS_ON_TOP.load(Ordering::Acquire) {
+                if let Err(e) = w.set_always_on_top(false) {
+                    eprintln!(
+                        "Error disabling temporary always on top for translator window: {}",
+                        e
+                    );
+                }
+            }
+        });
     }
 }
 
@@ -1666,5 +1735,68 @@ pub async fn hide_writing_indicator() {
             }
             set_webview_visibility(&window, false);
         }
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires an interactive Windows desktop and WebView2"]
+    // Run with: cargo test --release selection_popup_ -- --ignored --test-threads=1
+    fn selection_popup_stays_visible_when_pin_is_restored() {
+        let mut context = tauri::generate_context!();
+        context.config_mut().app.tray_icon = None;
+        let app = tauri::Builder::default()
+            .any_thread()
+            .build(context)
+            .expect("create test app");
+        let window = tauri::WebviewWindowBuilder::new(
+            &app,
+            "selection-visibility-regression",
+            tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+        )
+        .title("Selection visibility regression test")
+        .inner_size(160.0, 100.0)
+        .visible(false)
+        .focused(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .data_directory(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("target")
+                .join("selection-visibility-test-profile"),
+        )
+        .build()
+        .expect("create test window");
+
+        // Cover first display, reopening, and restoring a minimized window,
+        // both at the cursor and with the previous position retained.
+        for position in [Some(PhysicalPosition::new(0, 0)), None] {
+            for minimized in [false, true] {
+                window.set_always_on_top(true).unwrap();
+                if minimized {
+                    window.minimize().unwrap();
+                }
+                window.hide().unwrap();
+                show_selection_window(&window, position);
+                window.unminimize().unwrap();
+                assert!(
+                    window.is_visible().unwrap(),
+                    "popup must appear after capture"
+                );
+                assert!(!window.is_minimized().unwrap());
+
+                // A previous summon's delayed pin restoration may arrive
+                // during this summon; it must not hide the new popup.
+                window.set_always_on_top(false).unwrap();
+                assert!(
+                    window.is_visible().unwrap(),
+                    "restoring the pin preference must not hide the popup"
+                );
+            }
+        }
+        window.destroy().unwrap();
     }
 }
