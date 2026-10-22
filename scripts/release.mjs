@@ -75,6 +75,10 @@ run('pnpm', ['build'], {
         // falls back to an interactive prompt and hangs the build.
         TAURI_SIGNING_PRIVATE_KEY: KEY_PATH,
         TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '',
+        // tauri.conf.json ships with createUpdaterArtifacts:false so daily
+        // unsigned `pnpm build` runs do not fail at the signing step; the
+        // release build needs the .sig updater artifact, so turn it back on.
+        TAURI_CONFIG: JSON.stringify({ bundle: { createUpdaterArtifacts: true } }),
     },
 })
 

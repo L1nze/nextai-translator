@@ -7,7 +7,7 @@
     "prepare": "pnpm exec simple-git-hooks",
     "build-renderer": "tsc && vite build -c vite.config.tauri.ts",
     "dev-renderer": "vite -c vite.config.tauri.ts --force",
-    "build": "pnpm run build-renderer && tauri build",
+    "build": "pnpm run build-renderer && tauri build && node scripts/copy-bundle.mjs",
     "release": "node scripts/release.mjs",
     "dev": "tauri dev",
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
