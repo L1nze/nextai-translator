@@ -9,6 +9,7 @@ mod fetch;
 mod insertion;
 mod lang;
 mod ocr;
+mod panic_hook;
 mod tray;
 mod tts;
 mod utils;
@@ -113,7 +114,7 @@ fn get_update_result() -> (bool, Option<UpdateResult>) {
     if UPDATE_RESULT.lock().is_none() {
         return (false, None);
     }
-    return (true, UPDATE_RESULT.lock().clone().unwrap());
+    return (true, UPDATE_RESULT.lock().clone().flatten());
 }
 #[cfg(target_os = "macos")]
 fn query_accessibility_permissions() -> bool {
@@ -135,7 +136,11 @@ fn query_accessibility_permissions() -> bool {
 fn launch_ipc_server(server: &Server) {
     for mut req in server.incoming_requests() {
         let mut selected_text = String::new();
-        req.as_reader().read_to_string(&mut selected_text).unwrap();
+        if req.as_reader().read_to_string(&mut selected_text).is_err() {
+            let _ = req
+                .respond(HttpResponse::from_string("bad request").with_status_code(400));
+            continue;
+        }
         let use_compact = config::get_config()
             .ok()
             .and_then(|c| c.use_compact_lookup)
@@ -148,11 +153,167 @@ fn launch_ipc_server(server: &Server) {
             utils::send_text(selected_text);
             remember_active_window();
             let window = windows::show_translator_window(false, true, false);
-            window.set_focus().unwrap();
+            let _ = window.set_focus();
             utils::show();
         }
         let response = HttpResponse::from_string("ok");
-        req.respond(response).unwrap();
+        let _ = req.respond(response);
+    }
+}
+
+fn on_mouse_event(event: &mouce::common::MouseEvent) {
+    match event {
+        mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
+            let always_show_icons = config::get_config()
+                .ok()
+                .and_then(|c| c.always_show_icons)
+                .unwrap_or(true);
+            if !always_show_icons {
+                return;
+            }
+            let current_press_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            *PREVIOUS_PRESS_TIME.lock() = current_press_time;
+        }
+        mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
+            let always_show_icons = config::get_config()
+                .ok()
+                .and_then(|c| c.always_show_icons)
+                .unwrap_or(true);
+            if !always_show_icons {
+                windows::close_thumb();
+                return;
+            }
+            let current_release_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let mut is_text_selected_event = false;
+            let Ok((x, y)) = windows::get_mouse_location() else { return; };
+            let (prev_release_x, prev_release_y) = { *PREVIOUS_RELEASE_POSITION.lock() };
+            {
+                *PREVIOUS_RELEASE_POSITION.lock() = (x, y);
+            }
+            let mouse_distance =
+                (((x - prev_release_x).pow(2) + (y - prev_release_y).pow(2)) as f64).sqrt();
+            let previous_press_time: u128;
+            let previous_release_time: u128;
+            {
+                let previous_press_time_lock = PREVIOUS_PRESS_TIME.lock();
+                let mut previous_release_time_lock = PREVIOUS_RELEASE_TIME.lock();
+                previous_release_time = *previous_release_time_lock;
+                *previous_release_time_lock = current_release_time;
+                previous_press_time = *previous_press_time_lock;
+            }
+            let is_pressed = previous_release_time < previous_press_time;
+            let pressed_time = current_release_time - previous_press_time;
+            let is_double_click =
+                current_release_time - previous_release_time < 700 && mouse_distance < 10.0;
+            if is_pressed && pressed_time > 300 && mouse_distance > 20.0 {
+                is_text_selected_event = true;
+            }
+            if previous_release_time != 0 && is_double_click {
+                is_text_selected_event = true;
+            }
+            // Zero-IPC hit test against the cached thumb rect — the old
+            // version queried outer_position/scale_factor/outer_size on
+            // every left-button release system-wide.
+            let is_click_on_thumb = windows::is_thumb_hit(x, y);
+            // debug_println!("is_text_selected_event: {}", is_text_selected_event);
+            // debug_println!("is_click_on_thumb: {}", is_click_on_thumb);
+            if !is_text_selected_event && !is_click_on_thumb {
+                windows::close_thumb();
+                // println!("not text selected event");
+                // println!("is_click_on_thumb: {}", is_click_on_thumb);
+                // println!("mouse_distance: {}", mouse_distance);
+                // println!("pressed_time: {}", pressed_time);
+                // println!("released_time: {}", current_release_time - previous_release_time);
+                // println!("is_double_click: {}", is_double_click);
+                return;
+            }
+
+            if !is_click_on_thumb {
+                if RELEASE_THREAD_ID.is_locked() {
+                    return;
+                }
+                std::thread::spawn(move || {
+                    // The automatic selection capture below synthesizes
+                    // Ctrl+C. A console/terminal in the foreground reads
+                    // that as SIGINT and aborts the running command
+                    // (issue #548), so skip the capture — and the thumb
+                    // — entirely there. The explicit hotkey summon path
+                    // is unaffected.
+                    #[cfg(target_os = "windows")]
+                    {
+                        if windows::foreground_window_is_console() {
+                            debug_println!(
+                                "Skip selection capture: foreground window is a console"
+                            );
+                            windows::close_thumb();
+                            return;
+                        }
+                    }
+                    #[cfg(target_os = "macos")]
+                    {
+                        if !utils::is_valid_selected_frame().unwrap_or(false) {
+                            debug_println!("No valid selected frame");
+                            windows::close_thumb();
+                            return;
+                        }
+                    }
+
+                let _lock = RELEASE_THREAD_ID.lock();
+                let selected_text = windows::read_selected_text();
+                if !selected_text.is_empty() {
+                    {
+                        *SELECTED_TEXT.lock() = selected_text;
+                    }
+                    // The selection icon is optional: with it off, users
+                    // trigger translation purely via the global hotkey.
+                    let show_selection_icon = config::get_config()
+                        .ok()
+                        .and_then(|c| c.show_selection_icon)
+                        .unwrap_or(true);
+                    if show_selection_icon {
+                        windows::show_thumb(x, y);
+                    }
+                } else {
+                    windows::close_thumb();
+                }
+                });
+            } else {
+                windows::close_thumb();
+                let selected_text = (*SELECTED_TEXT.lock()).to_string();
+                if !selected_text.is_empty() {
+                    if RELEASE_THREAD_ID.is_locked() {
+                        return;
+                    }
+                    // Summon off the hook callback: the full window
+                    // pipeline used to run synchronously right here,
+                    // stalling every mouse event behind it.
+                    std::thread::spawn(move || {
+                        let _lock = RELEASE_THREAD_ID.lock();
+                        let use_compact = config::get_config()
+                            .ok()
+                            .and_then(|c| c.use_compact_lookup)
+                            .unwrap_or(false);
+                        if use_compact {
+                            let window = windows::show_inline_lookup_window(false, true, false);
+                            utils::send_text(selected_text);
+                            let _ = window.set_focus();
+                        } else {
+                            remember_active_window();
+                            let window = windows::show_translator_window(false, true, false);
+                            utils::send_text(selected_text);
+                            let _ = window.set_focus();
+                        }
+                    });
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -171,139 +332,14 @@ fn bind_mouse_hook() {
     let mut mouse_manager = Mouse::new();
 
     let hook_result = mouse_manager.hook(Box::new(|event| {
-        match event {
-            mouce::common::MouseEvent::Press(mouce::common::MouseButton::Left) => {
-                let config = config::get_config().unwrap();
-                let always_show_icons = config.always_show_icons.unwrap_or(true);
-                if !always_show_icons {
-                    return;
-                }
-                let current_press_time = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis();
-                *PREVIOUS_PRESS_TIME.lock() = current_press_time;
-            }
-            mouce::common::MouseEvent::Release(mouce::common::MouseButton::Left) => {
-                let config = config::get_config().unwrap();
-                let always_show_icons = config.always_show_icons.unwrap_or(true);
-                if !always_show_icons {
-                    windows::close_thumb();
-                    return;
-                }
-                let current_release_time = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis();
-                let mut is_text_selected_event = false;
-                let (x, y): (i32, i32) = windows::get_mouse_location().unwrap();
-                let (prev_release_x, prev_release_y) = { *PREVIOUS_RELEASE_POSITION.lock() };
-                {
-                    *PREVIOUS_RELEASE_POSITION.lock() = (x, y);
-                }
-                let mouse_distance =
-                    (((x - prev_release_x).pow(2) + (y - prev_release_y).pow(2)) as f64).sqrt();
-                let previous_press_time: u128;
-                let previous_release_time: u128;
-                {
-                    let previous_press_time_lock = PREVIOUS_PRESS_TIME.lock();
-                    let mut previous_release_time_lock = PREVIOUS_RELEASE_TIME.lock();
-                    previous_release_time = *previous_release_time_lock;
-                    *previous_release_time_lock = current_release_time;
-                    previous_press_time = *previous_press_time_lock;
-                }
-                let is_pressed = previous_release_time < previous_press_time;
-                let pressed_time = current_release_time - previous_press_time;
-                let is_double_click =
-                    current_release_time - previous_release_time < 700 && mouse_distance < 10.0;
-                if is_pressed && pressed_time > 300 && mouse_distance > 20.0 {
-                    is_text_selected_event = true;
-                }
-                if previous_release_time != 0 && is_double_click {
-                    is_text_selected_event = true;
-                }
-                // Zero-IPC hit test against the cached thumb rect — the old
-                // version queried outer_position/scale_factor/outer_size on
-                // every left-button release system-wide.
-                let is_click_on_thumb = windows::is_thumb_hit(x, y);
-                // debug_println!("is_text_selected_event: {}", is_text_selected_event);
-                // debug_println!("is_click_on_thumb: {}", is_click_on_thumb);
-                if !is_text_selected_event && !is_click_on_thumb {
-                    windows::close_thumb();
-                    // println!("not text selected event");
-                    // println!("is_click_on_thumb: {}", is_click_on_thumb);
-                    // println!("mouse_distance: {}", mouse_distance);
-                    // println!("pressed_time: {}", pressed_time);
-                    // println!("released_time: {}", current_release_time - previous_release_time);
-                    // println!("is_double_click: {}", is_double_click);
-                    return;
-                }
-
-                if !is_click_on_thumb {
-                    if RELEASE_THREAD_ID.is_locked() {
-                        return;
-                    }
-                    std::thread::spawn(move || {
-                        #[cfg(target_os = "macos")]
-                        {
-                            if !utils::is_valid_selected_frame().unwrap_or(false) {
-                                debug_println!("No valid selected frame");
-                                windows::close_thumb();
-                                return;
-                            }
-                        }
-
-                    let _lock = RELEASE_THREAD_ID.lock();
-                    let selected_text = windows::read_selected_text();
-                    if !selected_text.is_empty() {
-                        {
-                            *SELECTED_TEXT.lock() = selected_text;
-                        }
-                        // The selection icon is optional: with it off, users
-                        // trigger translation purely via the global hotkey.
-                        let show_selection_icon = config::get_config()
-                            .ok()
-                            .and_then(|c| c.show_selection_icon)
-                            .unwrap_or(true);
-                        if show_selection_icon {
-                            windows::show_thumb(x, y);
-                        }
-                    } else {
-                        windows::close_thumb();
-                    }
-                    });
-                } else {
-                    windows::close_thumb();
-                    let selected_text = (*SELECTED_TEXT.lock()).to_string();
-                    if !selected_text.is_empty() {
-                        if RELEASE_THREAD_ID.is_locked() {
-                            return;
-                        }
-                        // Summon off the hook callback: the full window
-                        // pipeline used to run synchronously right here,
-                        // stalling every mouse event behind it.
-                        std::thread::spawn(move || {
-                            let _lock = RELEASE_THREAD_ID.lock();
-                            let use_compact = config::get_config()
-                                .ok()
-                                .and_then(|c| c.use_compact_lookup)
-                                .unwrap_or(false);
-                            if use_compact {
-                                let window = windows::show_inline_lookup_window(false, true, false);
-                                utils::send_text(selected_text);
-                                let _ = window.set_focus();
-                            } else {
-                                remember_active_window();
-                                let window = windows::show_translator_window(false, true, false);
-                                utils::send_text(selected_text);
-                                let _ = window.set_focus();
-                            }
-                        });
-                    }
-                }
-            }
-            _ => {}
-        }
+        // This closure runs inside mouce's extern "system" hook procedure:
+        // a panic cannot unwind across the FFI boundary and would abort
+        // the whole process. catch_unwind is the last line of defense (the
+        // panic hook has already written the panic to the log file) and
+        // keeps the hook chain alive.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            on_mouse_event(event)
+        }));
     }));
 
     match hook_result {
@@ -317,6 +353,10 @@ fn bind_mouse_hook() {
 }
 
 fn main() {
+    // Install first, before anything can panic: release builds have no
+    // console, so the hook is the only way a panic leaves a trace.
+    panic_hook::install();
+
     // Without a working WebView2 Runtime not a single window can be created,
     // so the app would only ever flash a frame and abort (discussion #1907).
     // Fail up front with an actionable dialog instead.
@@ -400,12 +440,15 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             println!("{}, {argv:?}, {cwd}", app.package_info().name);
-            app.notification()
+            if let Err(e) = app
+                .notification()
                 .builder()
                 .title("This app is already running!")
                 .body("You can find it in the tray menu.")
                 .show()
-                .unwrap();
+            {
+                eprintln!("Error showing single-instance notification: {}", e);
+            }
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -419,12 +462,21 @@ fn main() {
             tray::create_tray(&app_handle)?;
             app_handle.plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
             app_handle.plugin(tauri_plugin_updater::Builder::new().build())?;
-            // create thumb window
-            let _ = windows::get_thumb_window(0, 0);
-            // If the selection icon can never show, suspend the pre-created
-            // thumb's WebView2 renderer — a hidden webview whose controller
-            // still reports IsVisible=TRUE composites forever (#1883).
-            {
+            // Pre-create the thumb window only when the app was launched
+            // explicitly. On autostart (`--silently`, typically right after
+            // boot) every synchronous WebView2 creation in setup runs on the
+            // main thread BEFORE the event loop starts: with disk and CPU
+            // contended by every other autostart app, building the thumb,
+            // dummy and translator webviews here stalled setup for tens of
+            // seconds — a dead tray, dead hotkey and dead IPC while it
+            // lasted. All of these windows have lazy-creation paths on first
+            // use, so a silent start creates nothing and wakes instantly.
+            if !silently {
+                // create thumb window
+                let _ = windows::get_thumb_window(0, 0);
+                // If the selection icon can never show, suspend the pre-created
+                // thumb's WebView2 renderer — a hidden webview whose controller
+                // still reports IsVisible=TRUE composites forever (#1883).
                 let config = config::get_config().unwrap_or_default();
                 let always_show_icons = config.always_show_icons.unwrap_or(true);
                 let show_selection_icon = config.show_selection_icon.unwrap_or(true);
@@ -452,31 +504,45 @@ fn main() {
                 let _ = windows::get_writing_indicator_window();
             }
             if silently {
-                // create translator window
-                let _ = get_translator_window(false, false, false);
-                windows::do_hide_translator_window();
-                debug_println!("translator window is hidden");
+                // Autostart: defer the translator window (and the thumb
+                // above) to the first summon — creating them here is what
+                // froze the app for a long while after boot. See the comment
+                // at the thumb pre-creation above.
+                debug_println!("silent start: windows deferred to first use");
             } else {
                 let window = get_translator_window(false, false, false);
-                window.set_focus().unwrap();
-                window.show().unwrap();
+                if let Err(e) = window.set_focus() {
+                    eprintln!("Error focusing translator window: {}", e);
+                }
+                if let Err(e) = window.show() {
+                    eprintln!("Error showing translator window: {}", e);
+                }
             }
             if !query_accessibility_permissions() {
                 if let Some(window) = app.get_webview_window(TRANSLATOR_WIN_NAME) {
-                    window.minimize().unwrap();
+                    let _ = window.minimize();
                 }
-                app.notification()
+                if let Err(e) = app
+                    .notification()
                     .builder()
                     .title("Accessibility permissions")
                     .body("Please grant accessibility permissions to the app")
                     .icon("icon.png")
                     .show()
-                    .unwrap();
+                {
+                    eprintln!("Error showing accessibility notification: {}", e);
+                }
             }
             std::thread::spawn(move || {
                 #[cfg(target_os = "windows")]
                 {
-                    let server = Server::http("127.0.0.1:62007").unwrap();
+                    let server = match Server::http("127.0.0.1:62007") {
+                        Ok(server) => server,
+                        Err(e) => {
+                            eprintln!("Error starting IPC server on 127.0.0.1:62007: {}", e);
+                            return;
+                        }
+                    };
                     launch_ipc_server(&server);
                 }
                 #[cfg(not(target_os = "windows"))]
@@ -484,7 +550,13 @@ fn main() {
                     use std::path::Path;
                     let path = Path::new("/tmp/openai-translator.sock");
                     std::fs::remove_file(path).unwrap_or_default();
-                    let server = Server::http_unix(path).unwrap();
+                    let server = match Server::http_unix(path) {
+                        Ok(server) => server,
+                        Err(e) => {
+                            eprintln!("Error starting IPC unix server: {}", e);
+                            return;
+                        }
+                    };
                     launch_ipc_server(&server);
                 }
             });
@@ -499,7 +571,10 @@ fn main() {
                     // process is perfectly healthy.
                     tokio::time::sleep(std::time::Duration::from_secs(60 * 10)).await;
                     let builder = handle.updater_builder();
-                    let updater = builder.build().unwrap();
+                    let Ok(updater) = builder.build() else {
+                        eprintln!("Error building updater in periodic check");
+                        continue;
+                    };
 
                     match updater.check().await {
                         Ok(Some(update)) => {
@@ -511,13 +586,17 @@ fn main() {
                                     body: update.body,
                                 }),
                             );
-                            tray::create_tray(&handle).unwrap();
+                            if let Err(e) = tray::create_tray(&handle) {
+                                eprintln!("Error recreating tray: {}", e);
+                            }
                         }
                         Ok(None) => {
                             let had_update = matches!(*UPDATE_RESULT.lock(), Some(Some(_)));
                             set_update_result(&handle, None);
                             if had_update {
-                                tray::create_tray(&handle).unwrap();
+                                if let Err(e) = tray::create_tray(&handle) {
+                                    eprintln!("Error recreating tray: {}", e);
+                                }
                             }
                         }
                         Err(_) => {}
@@ -528,13 +607,17 @@ fn main() {
             PinnedFromWindowEvent::listen_any(app_handle, move |event| {
                 let pinned = event.payload.pinned();
                 ALWAYS_ON_TOP.store(*pinned, Ordering::Release);
-                tray::create_tray(&handle).unwrap();
+                if let Err(e) = tray::create_tray(&handle) {
+                    eprintln!("Error recreating tray: {}", e);
+                }
             });
 
             let handle = app_handle.clone();
             ConfigUpdatedEvent::listen_any(app_handle, move |_event| {
                 clear_config_cache();
-                tray::create_tray(&handle).unwrap();
+                if let Err(e) = tray::create_tray(&handle) {
+                    eprintln!("Error recreating tray: {}", e);
+                }
             });
             Ok(())
         })
@@ -558,7 +641,13 @@ fn main() {
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 let builder = handle.updater_builder();
-                let updater = builder.build().unwrap();
+                let updater = match builder.build() {
+                    Ok(updater) => updater,
+                    Err(e) => {
+                        eprintln!("Error building updater in initial check: {}", e);
+                        return;
+                    }
+                };
 
                 match updater.check().await {
                     Ok(Some(update)) => {
@@ -570,8 +659,10 @@ fn main() {
                                 body: update.body,
                             }),
                         );
-                        tray::create_tray(&handle).unwrap();
-                        let config = get_config().unwrap();
+                        if let Err(e) = tray::create_tray(&handle) {
+                            eprintln!("Error recreating tray: {}", e);
+                        }
+                        let config = get_config().unwrap_or_default();
                         if config.automatic_check_for_updates.is_none()
                             || config
                                 .automatic_check_for_updates
@@ -585,7 +676,9 @@ fn main() {
                         let had_update = matches!(*UPDATE_RESULT.lock(), Some(Some(_)));
                         set_update_result(&handle, None);
                         if had_update {
-                            tray::create_tray(&handle).unwrap();
+                            if let Err(e) = tray::create_tray(&handle) {
+                                eprintln!("Error recreating tray: {}", e);
+                            }
                         }
                     }
                     Err(_) => {}

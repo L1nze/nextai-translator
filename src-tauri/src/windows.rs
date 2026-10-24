@@ -52,9 +52,9 @@ fn get_dummy_window() -> tauri::WebviewWindow {
     }
 }
 
-pub fn get_current_monitor() -> tauri::Monitor {
+pub fn get_current_monitor() -> Option<tauri::Monitor> {
     let window = get_dummy_window();
-    let (mouse_logical_x, mouse_logical_y): (i32, i32) = get_mouse_location().unwrap();
+    let (mouse_logical_x, mouse_logical_y): (i32, i32) = get_mouse_location().ok()?;
     let scale_factor = window.scale_factor().unwrap_or(1.0);
     let mut mouse_physical_position = PhysicalPosition::new(mouse_logical_x, mouse_logical_y);
     if cfg!(target_os = "macos") {
@@ -64,7 +64,8 @@ pub fn get_current_monitor() -> tauri::Monitor {
     }
     window
         .available_monitors()
-        .map(|monitors| {
+        .ok()
+        .and_then(|monitors| {
             monitors
                 .iter()
                 .find(|monitor| {
@@ -79,13 +80,8 @@ pub fn get_current_monitor() -> tauri::Monitor {
                 })
                 .cloned()
         })
-        .unwrap_or_else(|e| {
-            eprintln!("Error get available monitors: {}", e);
-            None
-        })
-        .or_else(|| window.current_monitor().unwrap())
-        .or_else(|| window.primary_monitor().unwrap())
-        .expect("No current monitor found")
+        .or_else(|| window.current_monitor().ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten())
 }
 
 pub fn get_mouse_location() -> Result<(i32, i32), String> {
@@ -102,10 +98,10 @@ pub fn set_translator_window_always_on_top() -> bool {
         let always_on_top = ALWAYS_ON_TOP.load(Ordering::Acquire);
 
         if !always_on_top {
-            window.set_always_on_top(true).unwrap();
+            let _ = window.set_always_on_top(true);
             ALWAYS_ON_TOP.store(true, Ordering::Release);
         } else {
-            window.set_always_on_top(false).unwrap();
+            let _ = window.set_always_on_top(false);
             ALWAYS_ON_TOP.store(false, Ordering::Release);
         }
         ALWAYS_ON_TOP.load(Ordering::Acquire)
@@ -158,6 +154,39 @@ fn restore_clipboard(saved: SavedClipboard) {
                 let _ = clipboard.clear();
             }
         }
+    }
+}
+
+/// Window classes of console/terminal hosts on Windows. Selection capture
+/// synthesizes Ctrl+C, and these windows interpret that keystroke as SIGINT
+/// and abort the running command (issue #548), so the automatic mouse-hook
+/// capture must never fire while one of them is in the foreground.
+#[cfg(target_os = "windows")]
+const CONSOLE_WINDOW_CLASSES: [&str; 5] = [
+    "ConsoleWindowClass",            // conhost: cmd, powershell, any console application
+    "CASCADIA_HOSTING_WINDOW_CLASS", // Windows Terminal
+    "mintty",                        // Git Bash / MSYS2
+    "PuTTY",                         // PuTTY
+    "VirtualConsoleClass",           // ConEmu
+];
+
+/// True while the foreground window belongs to a console/terminal host.
+#[cfg(target_os = "windows")]
+pub fn foreground_window_is_console() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow};
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return false;
+        }
+        let mut class_name = [0u16; 64];
+        let len = GetClassNameW(hwnd, &mut class_name) as usize;
+        if len == 0 {
+            return false;
+        }
+        let class = String::from_utf16_lossy(&class_name[..len]);
+        CONSOLE_WINDOW_CLASSES.contains(&class.as_str())
     }
 }
 
@@ -322,29 +351,31 @@ fn compute_translator_position_near_cursor(window: &tauri::WebviewWindow) -> Phy
             LogicalPosition::new(mouse_logical_x as f64, mouse_logical_y as f64).to_physical(scale_factor);
     }
 
-    let monitor_physical_size = current_monitor.size();
-    let monitor_physical_position = current_monitor.position();
-
     let mut target = mouse_physical_position;
-    if target.x < monitor_physical_position.x {
-        target.x = monitor_physical_position.x;
-    }
-    if target.y < monitor_physical_position.y {
-        target.y = monitor_physical_position.y;
-    }
-    if target.x + (window_physical_size.width as i32)
-        > monitor_physical_position.x + (monitor_physical_size.width as i32)
-    {
-        target.x = monitor_physical_position.x
-            + (monitor_physical_size.width as i32)
-            - (window_physical_size.width as i32);
-    }
-    if target.y + (window_physical_size.height as i32)
-        > monitor_physical_position.y + (monitor_physical_size.height as i32)
-    {
-        target.y = monitor_physical_position.y
-            + (monitor_physical_size.height as i32)
-            - (window_physical_size.height as i32);
+    if let Some(current_monitor) = current_monitor {
+        let monitor_physical_size = current_monitor.size();
+        let monitor_physical_position = current_monitor.position();
+
+        if target.x < monitor_physical_position.x {
+            target.x = monitor_physical_position.x;
+        }
+        if target.y < monitor_physical_position.y {
+            target.y = monitor_physical_position.y;
+        }
+        if target.x + (window_physical_size.width as i32)
+            > monitor_physical_position.x + (monitor_physical_size.width as i32)
+        {
+            target.x = monitor_physical_position.x
+                + (monitor_physical_size.width as i32)
+                - (window_physical_size.width as i32);
+        }
+        if target.y + (window_physical_size.height as i32)
+            > monitor_physical_position.y + (monitor_physical_size.height as i32)
+        {
+            target.y = monitor_physical_position.y
+                + (monitor_physical_size.height as i32)
+                - (window_physical_size.height as i32);
+        }
     }
     target
 }
@@ -380,12 +411,12 @@ pub fn do_hide_translator_window() {
             Some(window) => {
                 #[cfg(not(target_os = "macos"))]
                 {
-                    window.hide().unwrap();
+                    let _ = window.hide();
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    tauri::AppHandle::hide(&handle).unwrap();
-                    window.hide().unwrap();
+                    let _ = tauri::AppHandle::hide(&handle);
+                    let _ = window.hide();
                 }
             }
             None => {}
@@ -432,7 +463,9 @@ pub fn close_thumb() {
 pub fn show_thumb(x: i32, y: i32) {
     let window = get_thumb_window(x, y);
     set_webview_visibility(&window, true);
-    window.show().unwrap();
+    if let Err(e) = window.show() {
+        eprintln!("Error showing thumb window: {}", e);
+    }
     nudge_webview_visibility(&window);
     // Cache the placed rect for the hook's hit test. We are on the
     // selection worker thread here, so the two queries are off the hot path.
@@ -452,8 +485,8 @@ pub fn get_thumb_window(x: i32, y: i32) -> tauri::WebviewWindow {
     let window = match handle.get_webview_window(THUMB_WIN_NAME) {
         Some(window) => {
             debug_println!("Thumb window already exists");
-            window.unminimize().unwrap();
-            window.set_always_on_top(true).unwrap();
+            let _ = window.unminimize();
+            let _ = window.set_always_on_top(true);
             window
         }
         None => {
@@ -489,50 +522,49 @@ pub fn get_thumb_window(x: i32, y: i32) -> tauri::WebviewWindow {
                 use windows::Win32::UI::WindowsAndMessaging::{
                     SetWindowLongPtrW, GWL_STYLE, WS_POPUP,
                 };
-                let hwnd = window.hwnd().unwrap();
-                unsafe {
-                    // let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-                    // style = style & !(0x00020000 | 0x00010000 | 0x00080000); // WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU
-                    let style: u32 = WS_POPUP.0;
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+                if let Ok(hwnd) = window.hwnd() {
+                    // Rebuild the handle with our direct `windows` crate's
+                    // HWND type: tauri links a different `windows` version, so
+                    // its re-exported HWND cannot cross the type boundary.
+                    let hwnd = windows::Win32::Foundation::HWND(hwnd.0);
+                    unsafe {
+                        // let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                        // style = style & !(0x00020000 | 0x00010000 | 0x00080000); // WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU
+                        let style: u32 = WS_POPUP.0;
+                        SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+                    }
                 }
-                window
-                    .set_size(tauri::LogicalSize {
-                        width: 20.0,
-                        height: 20.0,
-                    })
-                    .unwrap();
+                let _ = window.set_size(tauri::LogicalSize {
+                    width: 20.0,
+                    height: 20.0,
+                });
             }
             post_process_window(&window);
 
-            window.unminimize().unwrap();
-            window.set_always_on_top(true).unwrap();
+            let _ = window.unminimize();
+            let _ = window.set_always_on_top(true);
 
             window
         }
     };
 
     if cfg!(target_os = "macos") {
-        window
-            .set_position(LogicalPosition::new(
-                x as f64 + position_offset,
-                y as f64 + position_offset,
-            ))
-            .unwrap();
+        let _ = window.set_position(LogicalPosition::new(
+            x as f64 + position_offset,
+            y as f64 + position_offset,
+        ));
     } else {
-        window
-            .set_position(PhysicalPosition::new(
-                x as f64 + position_offset,
-                y as f64 + position_offset,
-            ))
-            .unwrap();
+        let _ = window.set_position(PhysicalPosition::new(
+            x as f64 + position_offset,
+            y as f64 + position_offset,
+        ));
     }
 
     window
 }
 
 pub fn post_process_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
-    window.set_visible_on_all_workspaces(true).unwrap();
+    let _ = window.set_visible_on_all_workspaces(true);
 
     let _ = window.current_monitor();
 
@@ -752,7 +784,9 @@ pub fn show_translator_window(
     set_focus: bool,
 ) -> tauri::WebviewWindow {
     let window = get_translator_window(center, to_mouse_position, set_focus);
-    window.show().unwrap();
+    if let Err(e) = window.show() {
+        eprintln!("Error showing translator window: {}", e);
+    }
     nudge_webview_visibility(&window);
     if set_focus {
         // An accessory app cannot reliably raise its windows above other
@@ -809,7 +843,10 @@ fn focus_window_native(window: &tauri::WebviewWindow) {
     };
 
     let hwnd = match window.hwnd() {
-        Ok(hwnd) => hwnd,
+        // Rebuild with our direct `windows` crate's HWND type: tauri links a
+        // different `windows` version, so its re-exported HWND cannot cross
+        // the type boundary into the imports above.
+        Ok(hwnd) => windows::Win32::Foundation::HWND(hwnd.0),
         Err(e) => {
             eprintln!("Error getting translator window hwnd: {}", e);
             return;
@@ -882,14 +919,16 @@ pub fn get_translator_window(
     let handle = APP_HANDLE.get().unwrap();
     let window = match handle.get_webview_window(TRANSLATOR_WIN_NAME) {
         Some(window) => {
-            window.unminimize().unwrap();
+            let _ = window.unminimize();
             if set_focus {
-                window.set_focus().unwrap();
+                if let Err(e) = window.set_focus() {
+                    eprintln!("Error focusing translator window: {}", e);
+                }
             }
             window
         }
         None => {
-            let config = config::get_config_by_app(handle).unwrap();
+            let config = config::get_config_by_app(handle).unwrap_or_default();
 
             let builder = tauri::WebviewWindowBuilder::new(
                 handle,
@@ -920,12 +959,15 @@ pub fn get_translator_window(
     if restore_previous_position {
         debug_println!("Restoring previous position");
         if !cfg!(target_os = "macos") {
-            window.unminimize().unwrap();
+            let _ = window.unminimize();
         }
     } else if to_mouse_position {
         debug_println!("Setting position to mouse position");
-        let (mouse_logical_x, mouse_logical_y): (i32, i32) = get_mouse_location().unwrap();
-        let window_physical_size = window.outer_size().unwrap();
+        let Ok((mouse_logical_x, mouse_logical_y)) = get_mouse_location() else {
+            eprintln!("Error getting mouse location for translator window position");
+            return window;
+        };
+        let window_physical_size = window.outer_size().unwrap_or_default();
         let scale_factor = window.scale_factor().unwrap_or(1.0);
         let mut mouse_physical_position = PhysicalPosition::new(mouse_logical_x, mouse_logical_y);
         if cfg!(target_os = "macos") {
@@ -934,38 +976,42 @@ pub fn get_translator_window(
                     .to_physical(scale_factor);
         }
 
-        let monitor_physical_size = current_monitor.size();
-        let monitor_physical_position = current_monitor.position();
-
         let mut window_physical_position = mouse_physical_position;
-        if mouse_physical_position.x + (window_physical_size.width as i32)
-            > monitor_physical_position.x + (monitor_physical_size.width as i32)
-        {
-            window_physical_position.x = monitor_physical_position.x
-                + (monitor_physical_size.width as i32)
-                - (window_physical_size.width as i32);
-        }
-        if mouse_physical_position.y + (window_physical_size.height as i32)
-            > monitor_physical_position.y + (monitor_physical_size.height as i32)
-        {
-            window_physical_position.y = monitor_physical_position.y
-                + (monitor_physical_size.height as i32)
-                - (window_physical_size.height as i32);
+        if let Some(current_monitor) = current_monitor {
+            let monitor_physical_size = current_monitor.size();
+            let monitor_physical_position = current_monitor.position();
+
+            if mouse_physical_position.x + (window_physical_size.width as i32)
+                > monitor_physical_position.x + (monitor_physical_size.width as i32)
+            {
+                window_physical_position.x = monitor_physical_position.x
+                    + (monitor_physical_size.width as i32)
+                    - (window_physical_size.width as i32);
+            }
+            if mouse_physical_position.y + (window_physical_size.height as i32)
+                > monitor_physical_position.y + (monitor_physical_size.height as i32)
+            {
+                window_physical_position.y = monitor_physical_position.y
+                    + (monitor_physical_size.height as i32)
+                    - (window_physical_size.height as i32);
+            }
+            debug_println!("Monitor physical size: {:?}", monitor_physical_size);
+            debug_println!("Monitor physical position: {:?}", monitor_physical_position);
         }
         if !cfg!(target_os = "macos") {
-            window.unminimize().unwrap();
+            let _ = window.unminimize();
         }
         debug_println!("Mouse physical position: {:?}", mouse_physical_position);
-        debug_println!("Monitor physical size: {:?}", monitor_physical_size);
-        debug_println!("Monitor physical position: {:?}", monitor_physical_position);
         debug_println!("Window physical size: {:?}", window_physical_size);
         debug_println!("Window physical position: {:?}", window_physical_position);
-        window.set_position(window_physical_position).unwrap();
+        if let Err(e) = window.set_position(window_physical_position) {
+            eprintln!("Error setting translator window position: {}", e);
+        }
     } else if center {
         if !cfg!(target_os = "macos") {
-            window.unminimize().unwrap();
+            let _ = window.unminimize();
         }
-        window.center().unwrap();
+        let _ = window.center();
     }
 
     window
@@ -975,8 +1021,10 @@ pub fn get_translator_window(
 #[specta::specta]
 pub async fn show_action_manager_window() {
     let window = get_action_manager_window();
-    window.center().unwrap();
-    window.show().unwrap();
+    let _ = window.center();
+    if let Err(e) = window.show() {
+        eprintln!("Error showing action manager window: {}", e);
+    }
     nudge_webview_visibility(&window);
 }
 
@@ -984,8 +1032,10 @@ pub fn get_action_manager_window() -> tauri::WebviewWindow {
     let handle = APP_HANDLE.get().unwrap();
     let window = match handle.get_webview_window(ACTION_MANAGER_WIN_NAME) {
         Some(window) => {
-            window.unminimize().unwrap();
-            window.set_focus().unwrap();
+            let _ = window.unminimize();
+            if let Err(e) = window.set_focus() {
+                eprintln!("Error focusing action manager window: {}", e);
+            }
             window
         }
         None => {
@@ -1013,11 +1063,13 @@ pub fn get_action_manager_window() -> tauri::WebviewWindow {
 #[specta::specta]
 pub async fn show_history_window() {
     let window = get_history_window();
-    window.center().unwrap();
+    let _ = window.center();
     // Re-sync the controller before showing: the close handler hides the
     // window and stops the webview from compositing.
     set_webview_visibility(&window, true);
-    window.show().unwrap();
+    if let Err(e) = window.show() {
+        eprintln!("Error showing history window: {}", e);
+    }
     nudge_webview_visibility(&window);
 }
 
@@ -1025,8 +1077,10 @@ pub fn get_history_window() -> tauri::WebviewWindow {
     let handle = APP_HANDLE.get().unwrap();
     let window = match handle.get_webview_window(HISTORY_WIN_NAME) {
         Some(window) => {
-            window.unminimize().unwrap();
-            window.set_focus().unwrap();
+            let _ = window.unminimize();
+            if let Err(e) = window.set_focus() {
+                eprintln!("Error focusing history window: {}", e);
+            }
             window
         }
         None => {
@@ -1052,11 +1106,13 @@ pub fn get_history_window() -> tauri::WebviewWindow {
 
 pub fn show_settings_window() {
     let window = get_settings_window();
-    window.center().unwrap();
+    let _ = window.center();
     // Re-sync the controller before showing: the close handler hides the
     // window and stops the webview from compositing.
     set_webview_visibility(&window, true);
-    window.show().unwrap();
+    if let Err(e) = window.show() {
+        eprintln!("Error showing settings window: {}", e);
+    }
     nudge_webview_visibility(&window);
 }
 
@@ -1064,8 +1120,10 @@ pub fn get_settings_window() -> tauri::WebviewWindow {
     let handle = APP_HANDLE.get().unwrap();
     let window = match handle.get_webview_window(SETTINGS_WIN_NAME) {
         Some(window) => {
-            window.unminimize().unwrap();
-            window.set_focus().unwrap();
+            let _ = window.unminimize();
+            if let Err(e) = window.set_focus() {
+                eprintln!("Error focusing settings window: {}", e);
+            }
             window
         }
         None => {
@@ -1099,8 +1157,10 @@ pub struct CheckUpdateEvent;
 #[specta::specta]
 pub fn show_updater_window() {
     let window = get_updater_window();
-    window.center().unwrap();
-    window.show().unwrap();
+    let _ = window.center();
+    if let Err(e) = window.show() {
+        eprintln!("Error showing updater window: {}", e);
+    }
     nudge_webview_visibility(&window);
 
     let handle = APP_HANDLE.get().unwrap();
@@ -1108,27 +1168,30 @@ pub fn show_updater_window() {
         let window_clone = window.clone();
         tauri::async_runtime::spawn(async move {
             let builder = handle.updater_builder();
-            let updater = builder.build().unwrap();
+            let updater = match builder.build() {
+                Ok(updater) => updater,
+                Err(e) => {
+                    eprintln!("Error building updater: {}", e);
+                    return;
+                }
+            };
 
             match updater.check().await {
                 Ok(Some(update)) => {
-                    CheckUpdateResultEvent(UpdateResult {
+                    let _ = CheckUpdateResultEvent(UpdateResult {
                         version: update.version,
                         current_version: update.current_version,
                         body: update.body,
                     })
-                    .emit(handle)
-                    .unwrap();
+                    .emit(handle);
                 }
                 Ok(None) => {
-                    handle
-                        .emit(
-                            "update_result",
-                            json!({
-                                "result": None::<UpdateResult>
-                            }),
-                        )
-                        .unwrap();
+                    let _ = handle.emit(
+                        "update_result",
+                        json!({
+                            "result": None::<UpdateResult>
+                        }),
+                    );
                 }
                 Err(_) => {}
             }
@@ -1141,8 +1204,10 @@ pub fn get_updater_window() -> tauri::WebviewWindow {
     let handle = APP_HANDLE.get().unwrap();
     let window = match handle.get_webview_window(UPDATER_WIN_NAME) {
         Some(window) => {
-            window.unminimize().unwrap();
-            window.set_focus().unwrap();
+            let _ = window.unminimize();
+            if let Err(e) = window.set_focus() {
+                eprintln!("Error focusing updater window: {}", e);
+            }
             window
         }
         None => {
@@ -1170,7 +1235,7 @@ pub fn get_inline_lookup_window() -> tauri::WebviewWindow {
     let handle = APP_HANDLE.get().unwrap();
     let window = match handle.get_webview_window(INLINE_LOOKUP_WIN_NAME) {
         Some(window) => {
-            window.unminimize().unwrap();
+            let _ = window.unminimize();
             window
         }
         None => {
@@ -1211,54 +1276,61 @@ pub fn show_inline_lookup_window(
 ) -> tauri::WebviewWindow {
     let window = get_inline_lookup_window();
     if to_mouse_position {
-        let (mouse_logical_x, mouse_logical_y): (i32, i32) = get_mouse_location().unwrap();
-        let scale_factor = window.scale_factor().unwrap_or(1.0);
-        let current_monitor = get_current_monitor();
-        let monitor_physical_size = current_monitor.size();
-        let monitor_physical_position = current_monitor.position();
-        let window_physical_size = window.outer_size().unwrap_or_default();
+        if let Ok((mouse_logical_x, mouse_logical_y)) = get_mouse_location() {
+            let scale_factor = window.scale_factor().unwrap_or(1.0);
+            let window_physical_size = window.outer_size().unwrap_or_default();
 
-        let mut mouse_physical_position = PhysicalPosition::new(mouse_logical_x, mouse_logical_y);
-        if cfg!(target_os = "macos") {
-            mouse_physical_position =
-                LogicalPosition::new(mouse_logical_x as f64, mouse_logical_y as f64)
-                    .to_physical(scale_factor);
-        }
+            let mut mouse_physical_position = PhysicalPosition::new(mouse_logical_x, mouse_logical_y);
+            if cfg!(target_os = "macos") {
+                mouse_physical_position =
+                    LogicalPosition::new(mouse_logical_x as f64, mouse_logical_y as f64)
+                        .to_physical(scale_factor);
+            }
 
-        let mut window_physical_position = mouse_physical_position;
+            let mut window_physical_position = mouse_physical_position;
 
-        // Horizontal: clamp to right edge
-        if window_physical_position.x + (window_physical_size.width as i32)
-            > monitor_physical_position.x + (monitor_physical_size.width as i32)
-        {
-            window_physical_position.x = monitor_physical_position.x
-                + (monitor_physical_size.width as i32)
-                - (window_physical_size.width as i32);
-        }
+            if let Some(current_monitor) = get_current_monitor() {
+                let monitor_physical_size = current_monitor.size();
+                let monitor_physical_position = current_monitor.position();
 
-        // Vertical: screen divided into 6 zones
-        // Flip above if bottom crosses 5/6 line, flip below if top crosses 1/6 line
-        let h = monitor_physical_size.height as i32;
-        let top_edge = monitor_physical_position.y;
-        let zone_1_6 = top_edge + h / 6;
-        let zone_5_6 = top_edge + h * 5 / 6;
+                // Horizontal: clamp to right edge
+                if window_physical_position.x + (window_physical_size.width as i32)
+                    > monitor_physical_position.x + (monitor_physical_size.width as i32)
+                {
+                    window_physical_position.x = monitor_physical_position.x
+                        + (monitor_physical_size.width as i32)
+                        - (window_physical_size.width as i32);
+                }
 
-        // Default: place below mouse with small gap
-        let gap = 8i32;
-        window_physical_position.y = mouse_physical_position.y + gap;
-        let would_be_bottom = window_physical_position.y + (window_physical_size.height as i32);
-        if would_be_bottom > zone_5_6 {
-            // Flip above mouse with gap
-            let above_y = mouse_physical_position.y - (window_physical_size.height as i32) - gap;
-            if above_y >= zone_1_6 {
-                window_physical_position.y = above_y;
-            } else {
-                window_physical_position.y = zone_1_6;
+                // Vertical: screen divided into 6 zones
+                // Flip above if bottom crosses 5/6 line, flip below if top crosses 1/6 line
+                let h = monitor_physical_size.height as i32;
+                let top_edge = monitor_physical_position.y;
+                let zone_1_6 = top_edge + h / 6;
+                let zone_5_6 = top_edge + h * 5 / 6;
+
+                // Default: place below mouse with small gap
+                let gap = 8i32;
+                window_physical_position.y = mouse_physical_position.y + gap;
+                let would_be_bottom =
+                    window_physical_position.y + (window_physical_size.height as i32);
+                if would_be_bottom > zone_5_6 {
+                    // Flip above mouse with gap
+                    let above_y =
+                        mouse_physical_position.y - (window_physical_size.height as i32) - gap;
+                    if above_y >= zone_1_6 {
+                        window_physical_position.y = above_y;
+                    } else {
+                        window_physical_position.y = zone_1_6;
+                    }
+                }
+                let _ = window.set_position(window_physical_position);
             }
         }
-        let _ = window.set_position(window_physical_position);
     }
-    window.show().unwrap();
+    if let Err(e) = window.show() {
+        eprintln!("Error showing inline lookup window: {}", e);
+    }
     nudge_webview_visibility(&window);
     window
 }
@@ -1297,16 +1369,16 @@ pub fn show_screenshot_window() {
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-pub fn get_screenshot_window() -> tauri::WebviewWindow {
+pub fn get_screenshot_window() -> Option<tauri::WebviewWindow> {
     let handle = APP_HANDLE.get().unwrap();
-    let current_monitor = get_current_monitor();
+    let current_monitor = get_current_monitor()?;
     let dpi = current_monitor.scale_factor();
     let physical_position = current_monitor.position();
     let position: tauri::LogicalPosition<f64> = physical_position.to_logical(dpi);
 
     let window = match handle.get_webview_window(SCREENSHOT_WIN_NAME) {
         Some(window) => {
-            window.set_focus().unwrap();
+            let _ = window.set_focus();
             window
         }
         None => {
@@ -1343,13 +1415,15 @@ pub fn get_screenshot_window() -> tauri::WebviewWindow {
     }
 
     #[cfg(not(target_os = "macos"))]
-    window.set_fullscreen(true).unwrap();
+    if let Err(e) = window.set_fullscreen(true) {
+        eprintln!("screenshot window set_fullscreen failed: {e:?}");
+    }
 
     if let Err(e) = window.set_always_on_top(true) {
         eprintln!("screenshot window set_always_on_top failed: {e:?}");
     }
 
-    window
+    Some(window)
 }
 
 #[cfg(target_os = "macos")]
@@ -1436,7 +1510,10 @@ fn position_quick_translator_window(window: &tauri::WebviewWindow) {
     // Anchor the Quick Translator panel to the bottom-horizontal-center of the
     // monitor that currently holds the mouse cursor, with a comfortable gap
     // from the bottom edge (Dock-aware fallback uses a fixed margin).
-    let current_monitor = get_current_monitor();
+    let Some(current_monitor) = get_current_monitor() else {
+        // No monitor (topology change): keep the window at its last position.
+        return;
+    };
     let window_outer_size = match window.outer_size() {
         Ok(size) => size,
         Err(_) => return,
@@ -1621,15 +1698,21 @@ fn position_writing_indicator_window_at_anchor(
     let physical = LogicalPosition::new(top_logical_x, top_logical_y).to_physical::<i32>(scale);
 
     // Clamp to the monitor that holds the anchor's center (best effort).
-    let monitor = get_current_monitor();
-    let m_pos = monitor.position();
-    let m_size = monitor.size();
-    let max_x = m_pos.x + (m_size.width as i32) - (outer.width as i32);
-    let max_y = m_pos.y + (m_size.height as i32) - (outer.height as i32);
-    let x = physical.x.clamp(m_pos.x, max_x.max(m_pos.x));
-    let y = physical.y.clamp(m_pos.y, max_y.max(m_pos.y));
+    match get_current_monitor() {
+        Some(monitor) => {
+            let m_pos = monitor.position();
+            let m_size = monitor.size();
+            let max_x = m_pos.x + (m_size.width as i32) - (outer.width as i32);
+            let max_y = m_pos.y + (m_size.height as i32) - (outer.height as i32);
+            let x = physical.x.clamp(m_pos.x, max_x.max(m_pos.x));
+            let y = physical.y.clamp(m_pos.y, max_y.max(m_pos.y));
 
-    let _ = window.set_position(PhysicalPosition::new(x, y));
+            let _ = window.set_position(PhysicalPosition::new(x, y));
+        }
+        None => {
+            let _ = window.set_position(PhysicalPosition::new(physical.x, physical.y));
+        }
+    }
 }
 
 fn position_writing_indicator_window_near_mouse(window: &tauri::WebviewWindow) {

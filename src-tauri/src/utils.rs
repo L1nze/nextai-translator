@@ -24,12 +24,12 @@ pub fn select_all(enigo: &mut Enigo) {
 
     up_control_keys(enigo);
 
-    enigo.key(Key::Control, Direction::Press).unwrap();
+    let _ = enigo.key(Key::Control, Direction::Press);
     #[cfg(target_os = "windows")]
-    enigo.key(Key::A, Direction::Click).unwrap();
+    let _ = enigo.key(Key::A, Direction::Click);
     #[cfg(target_os = "linux")]
-    enigo.key(Key::Unicode('a'), Direction::Click).unwrap();
-    enigo.key(Key::Control, Direction::Release).unwrap();
+    let _ = enigo.key(Key::Unicode('a'), Direction::Click);
+    let _ = enigo.key(Key::Control, Direction::Release);
 }
 
 #[allow(dead_code)]
@@ -59,7 +59,7 @@ pub fn left_arrow_click(enigo: &mut Enigo, n: usize) {
     let _guard = INPUT_LOCK.lock();
 
     for _ in 0..n {
-        enigo.key(Key::LeftArrow, Direction::Click).unwrap();
+        let _ = enigo.key(Key::LeftArrow, Direction::Click);
     }
 }
 
@@ -88,7 +88,7 @@ pub fn right_arrow_click(enigo: &mut Enigo, n: usize) {
     let _guard = INPUT_LOCK.lock();
 
     for _ in 0..n {
-        enigo.key(Key::RightArrow, Direction::Click).unwrap();
+        let _ = enigo.key(Key::RightArrow, Direction::Click);
     }
 }
 
@@ -117,7 +117,7 @@ pub fn backspace_click(enigo: &mut Enigo, n: usize) {
     let _guard = INPUT_LOCK.lock();
 
     for _ in 0..n {
-        enigo.key(Key::Backspace, Direction::Click).unwrap();
+        let _ = enigo.key(Key::Backspace, Direction::Click);
     }
 }
 
@@ -144,11 +144,11 @@ pub fn backspace_click(_enigo: &mut Enigo, n: usize) {
 #[allow(dead_code)]
 #[cfg(not(target_os = "macos"))]
 pub fn up_control_keys(enigo: &mut Enigo) {
-    enigo.key(Key::Control, Direction::Release).unwrap();
-    enigo.key(Key::Alt, Direction::Release).unwrap();
-    enigo.key(Key::Shift, Direction::Release).unwrap();
-    enigo.key(Key::Space, Direction::Release).unwrap();
-    enigo.key(Key::Tab, Direction::Release).unwrap();
+    let _ = enigo.key(Key::Control, Direction::Release);
+    let _ = enigo.key(Key::Alt, Direction::Release);
+    let _ = enigo.key(Key::Shift, Direction::Release);
+    let _ = enigo.key(Key::Space, Direction::Release);
+    let _ = enigo.key(Key::Tab, Direction::Release);
 }
 
 #[allow(dead_code)]
@@ -172,12 +172,12 @@ pub fn copy(enigo: &mut Enigo) {
 
     up_control_keys(enigo);
 
-    enigo.key(Key::Control, Direction::Press).unwrap();
+    let _ = enigo.key(Key::Control, Direction::Press);
     #[cfg(target_os = "windows")]
-    enigo.key(Key::C, Direction::Click).unwrap();
+    let _ = enigo.key(Key::C, Direction::Click);
     #[cfg(target_os = "linux")]
-    enigo.key(Key::Unicode('c'), Direction::Click).unwrap();
-    enigo.key(Key::Control, Direction::Release).unwrap();
+    let _ = enigo.key(Key::Unicode('c'), Direction::Click);
+    let _ = enigo.key(Key::Control, Direction::Release);
 }
 
 #[allow(dead_code)]
@@ -207,12 +207,12 @@ pub fn paste(enigo: &mut Enigo) {
 
     up_control_keys(enigo);
 
-    enigo.key(Key::Control, Direction::Press).unwrap();
+    let _ = enigo.key(Key::Control, Direction::Press);
     #[cfg(target_os = "windows")]
-    enigo.key(Key::V, Direction::Click).unwrap();
+    let _ = enigo.key(Key::V, Direction::Click);
     #[cfg(target_os = "linux")]
-    enigo.key(Key::Unicode('v'), Direction::Click).unwrap();
-    enigo.key(Key::Control, Direction::Release).unwrap();
+    let _ = enigo.key(Key::Unicode('v'), Direction::Click);
+    let _ = enigo.key(Key::Control, Direction::Release);
 }
 
 #[allow(dead_code)]

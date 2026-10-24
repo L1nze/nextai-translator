@@ -82,3 +82,7 @@ default = ["custom-protocol"]
 # this feature is used for production builds where `devPath` points to the filesystem
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]
+
+# Line tables keep panic backtraces in release builds readable (see panic_hook.rs)
+[profile.release]
+debug = "line-tables-only"

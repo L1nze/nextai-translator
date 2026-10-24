@@ -53,7 +53,10 @@ pub struct Config {
 static CONFIG_CACHE: Mutex<Option<Config>> = Mutex::new(None);
 
 pub fn get_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let app_handle = APP_HANDLE.get().unwrap();
+    // Called from mouse-hook callbacks and tray creation; never panic here.
+    let app_handle = APP_HANDLE
+        .get()
+        .ok_or("app handle is not initialized yet")?;
     get_config_by_app(app_handle)
 }
 
@@ -103,18 +106,23 @@ pub fn get_config_content() -> String {
     }
 }
 
+// Everything below returns Err instead of unwrapping: get_config() is also
+// reached from mouse-hook callbacks (an extern "system" boundary) and from
+// tray creation on the main thread, where any panic kills the whole process.
 pub fn get_config_content_by_app(app: &AppHandle) -> Result<String, String> {
     let app_paths = app.path();
     let app_config_dir = app_paths
         .resolve("xyz.yetone.apps.openai-translator", BaseDirectory::Config)
-        .unwrap();
+        .map_err(|e| format!("failed to resolve config dir: {}", e))?;
     if !app_config_dir.exists() {
         let old_config_dir = app_paths
             .resolve("xyz.yetone.apps.nextai-translator", BaseDirectory::Config)
-            .unwrap();
+            .map_err(|e| format!("failed to resolve config dir: {}", e))?;
         if old_config_dir.exists() {
             if std::fs::rename(&old_config_dir, &app_config_dir).is_err() {
-                std::fs::create_dir_all(&app_config_dir).unwrap();
+                if let Err(e) = std::fs::create_dir_all(&app_config_dir) {
+                    return Err(format!("failed to create config dir: {}", e));
+                }
                 if let Ok(entries) = std::fs::read_dir(&old_config_dir) {
                     for entry in entries.flatten() {
                         let target_path = app_config_dir.join(entry.file_name());
@@ -128,7 +136,9 @@ pub fn get_config_content_by_app(app: &AppHandle) -> Result<String, String> {
                 let _ = std::fs::remove_dir_all(&old_config_dir);
             }
         } else {
-            std::fs::create_dir_all(&app_config_dir).unwrap();
+            if let Err(e) = std::fs::create_dir_all(&app_config_dir) {
+                return Err(format!("failed to create config dir: {}", e));
+            }
         }
     }
     let config_path = app_config_dir.join("config.json");
@@ -153,7 +163,7 @@ pub fn get_config_content_by_app(app: &AppHandle) -> Result<String, String> {
             Err(_) => Err("Failed to read config file".to_string()),
         }
     } else {
-        std::fs::write(config_path, "{}").unwrap();
+        std::fs::write(config_path, "{}").map_err(|e| format!("failed to write default config: {}", e))?;
         Ok("{}".to_string())
     }
 }

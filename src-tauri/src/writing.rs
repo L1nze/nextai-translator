@@ -119,7 +119,13 @@ pub fn writing_command() {
     // panel can sit exactly under the input the user just acted on.
     *CACHED_ANCHOR.lock() = get_writing_anchor_rect();
 
-    let mut enigo = Enigo::new(&Settings::default()).unwrap();
+    let mut enigo = match Enigo::new(&Settings::default()) {
+        Ok(enigo) => enigo,
+        Err(e) => {
+            eprintln!("Error creating enigo: {}", e);
+            return;
+        }
+    };
 
     // PREFERRED PATH (clean): read selection/value straight from the macOS
     // Accessibility tree. No clipboard hijack, no ⌘A flash, no cursor jump.
@@ -190,46 +196,64 @@ fn do_write_to_input(enigo: &mut Enigo, text: String, animation: bool) {
                             .collect::<Vec<&str>>();
                         for key in &keys {
                             if key.len() == 1 {
-                                enigo
-                                    .key(
-                                        Key::Unicode(key.chars().next().unwrap()),
-                                        Direction::Press,
-                                    )
-                                    .unwrap_or_default();
+                                if let Some(c) = key.chars().next() {
+                                    let _ = enigo.key(Key::Unicode(c), Direction::Press);
+                                }
                             } else {
                                 match *key {
-                                    "ctrl" => enigo.key(Key::Control, Direction::Press).unwrap(),
-                                    "alt" => enigo.key(Key::Alt, Direction::Press).unwrap(),
-                                    "shift" => enigo.key(Key::Shift, Direction::Press).unwrap(),
-                                    "meta" => enigo.key(Key::Meta, Direction::Press).unwrap(),
-                                    "caps_lock" => {
-                                        enigo.key(Key::CapsLock, Direction::Press).unwrap()
+                                    "ctrl" => {
+                                        let _ = enigo.key(Key::Control, Direction::Press);
                                     }
-                                    "escape" => enigo.key(Key::Escape, Direction::Press).unwrap(),
-                                    "enter" => enigo.key(Key::Return, Direction::Press).unwrap(),
+                                    "alt" => {
+                                        let _ = enigo.key(Key::Alt, Direction::Press);
+                                    }
+                                    "shift" => {
+                                        let _ = enigo.key(Key::Shift, Direction::Press);
+                                    }
+                                    "meta" => {
+                                        let _ = enigo.key(Key::Meta, Direction::Press);
+                                    }
+                                    "caps_lock" => {
+                                        let _ = enigo.key(Key::CapsLock, Direction::Press);
+                                    }
+                                    "escape" => {
+                                        let _ = enigo.key(Key::Escape, Direction::Press);
+                                    }
+                                    "enter" => {
+                                        let _ = enigo.key(Key::Return, Direction::Press);
+                                    }
                                     _ => {}
                                 }
                             }
                         }
                         for key in keys.iter().rev() {
                             if key.len() == 1 {
-                                enigo
-                                    .key(
-                                        Key::Unicode(key.chars().next().unwrap()),
-                                        Direction::Release,
-                                    )
-                                    .unwrap_or_default();
+                                if let Some(c) = key.chars().next() {
+                                    let _ = enigo.key(Key::Unicode(c), Direction::Release);
+                                }
                             } else {
                                 match *key {
-                                    "ctrl" => enigo.key(Key::Control, Direction::Release).unwrap(),
-                                    "alt" => enigo.key(Key::Alt, Direction::Release).unwrap(),
-                                    "shift" => enigo.key(Key::Shift, Direction::Release).unwrap(),
-                                    "meta" => enigo.key(Key::Meta, Direction::Release).unwrap(),
-                                    "caps_lock" => {
-                                        enigo.key(Key::CapsLock, Direction::Release).unwrap()
+                                    "ctrl" => {
+                                        let _ = enigo.key(Key::Control, Direction::Release);
                                     }
-                                    "escape" => enigo.key(Key::Escape, Direction::Release).unwrap(),
-                                    "enter" => enigo.key(Key::Return, Direction::Release).unwrap(),
+                                    "alt" => {
+                                        let _ = enigo.key(Key::Alt, Direction::Release);
+                                    }
+                                    "shift" => {
+                                        let _ = enigo.key(Key::Shift, Direction::Release);
+                                    }
+                                    "meta" => {
+                                        let _ = enigo.key(Key::Meta, Direction::Release);
+                                    }
+                                    "caps_lock" => {
+                                        let _ = enigo.key(Key::CapsLock, Direction::Release);
+                                    }
+                                    "escape" => {
+                                        let _ = enigo.key(Key::Escape, Direction::Release);
+                                    }
+                                    "enter" => {
+                                        let _ = enigo.key(Key::Return, Direction::Release);
+                                    }
                                     _ => {}
                                 }
                             }
@@ -249,7 +273,13 @@ fn do_write_to_input(enigo: &mut Enigo, text: String, animation: bool) {
 #[tauri::command]
 #[specta::specta]
 pub fn write_to_input(text: String) {
-    let mut enigo = Enigo::new(&Settings::default()).unwrap();
+    let mut enigo = match Enigo::new(&Settings::default()) {
+        Ok(enigo) => enigo,
+        Err(e) => {
+            eprintln!("Error creating enigo: {}", e);
+            return;
+        }
+    };
 
     let mut is_first = IS_FIRST_CHUNK.lock();
     if *is_first {

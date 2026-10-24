@@ -47,9 +47,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
         None::<String>,
     )?;
     if let Some(Some(_)) = *UPDATE_RESULT.lock() {
-        check_for_updates_i
-            .set_text("💡 New version available!")
-            .unwrap();
+        let _ = check_for_updates_i.set_text("💡 New version available!");
     }
     let settings_i = MenuItem::with_id(app, "settings", "Settings", true, Some("CmdOrCtrl+,"))?;
     let ocr_i = MenuItem::with_id(app, "ocr", "OCR", true, config.ocr_hotkey)?;
@@ -57,7 +55,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let hide_i = PredefinedMenuItem::hide(app, Some("Hide"))?;
     let pin_i = MenuItem::with_id(app, "pin", "Pin", true, None::<String>)?;
     if ALWAYS_ON_TOP.load(Ordering::Acquire) {
-        pin_i.set_text("Unpin").unwrap();
+        let _ = pin_i.set_text("Unpin");
     }
     // Tauri predefined quit items are unsupported on Linux.
     #[cfg(target_os = "linux")]
@@ -101,9 +99,9 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
         }
         "hide" => {
             if let Some(window) = app.get_webview_window(TRANSLATOR_WIN_NAME) {
-                window.set_focus().unwrap();
-                window.unminimize().unwrap();
-                window.hide().unwrap();
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+                let _ = window.hide();
             }
         }
         "pin" => {
@@ -111,7 +109,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
             let handle = app.app_handle();
             let pinned_from_tray_event = PinnedFromTrayEvent { pinned };
             pinned_from_tray_event.emit(handle).unwrap_or_default();
-            create_tray(app).unwrap();
+            let _ = create_tray(app);
         }
         "quit" => app.exit(0),
         _ => {}
